@@ -12,6 +12,7 @@
   voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; vocals only.
   melband     MelBand RoFormer (Kim, fine-tuned by unwa). Least music bleed of
               all models tested, but the slowest; vocals only.
+  voc_ft_dnr  Voices from voc_ft + sound effects from dnr_demucs (experimental).
 
 Shared on top of every model:
 
@@ -309,5 +310,54 @@ class MelBandEngine(_VocalsOnly):
         return v if v.dim() == 3 else v[:, 0]  # [B, C, T]
 
 
+class VocFTDnREngine(Engine):
+    """Voices from UVR Voc FT + sound effects from DnR Demucs (experimental).
+
+    Voc FT has no effects stem (its "other" is music and effects together), and DnR
+    Demucs separates effects from music. Combining them keeps Voc FT's voices and adds
+    DnR's effects back. The bleed filter uses DnR's music estimate. Both models run on
+    every chunk, and they're shared with the standalone voc_ft / dnr_demucs options, so
+    switching between them doesn't load anything twice.
+    """
+
+    keep_stems = ("vocals", "effects")
+    music_stems = ("music",)
+
+    def __init__(self):
+        super().__init__()
+        self.voc = get("voc_ft")
+        self.dnr = get("dnr_demucs")
+
+    def to(self, device: str):
+        self.voc.to(device)
+        self.dnr.to(device)
+        self.device = device
+        return self
+
+    @property
+    def fp16(self):
+        return self.voc.fp16 and self.dnr.fp16
+
+    @fp16.setter
+    def fp16(self, value):
+        pass  # set on the two models
+
+    @torch.no_grad()
+    def stems_of(self, x) -> dict:
+        v = self.voc.stems_of(x)
+        d = self.dnr.stems_of(x)
+        return {"vocals": v["vocals"], "effects": d["effects"], "music": d["music"]}
+
+
 ENGINES = {"bandit": BanditEngine, "demucs": DemucsEngine, "dnr_demucs": DnRDemucsEngine,
-           "voc_ft": VocFTEngine, "melband": MelBandEngine}
+           "voc_ft": VocFTEngine, "melband": MelBandEngine, "voc_ft_dnr": VocFTDnREngine}
+
+_loaded: dict = {}
+
+
+def get(name: str) -> Engine:
+    """Load an engine once and reuse it (combined engines share their parts)."""
+    if name not in _loaded:
+        print(f"[musicremover] loading {name}", flush=True)
+        _loaded[name] = ENGINES[name]()
+    return _loaded[name]

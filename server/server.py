@@ -57,15 +57,11 @@ if GPU_INFO["hint"]:
 
 # One separation at a time: models (and the GPU) are shared.
 LOCK = threading.Lock()
-LOADED: dict = {}
 LAST = {"engine": None, "device": None}
 
 
 def get_engine(name: str, device: str) -> "engines.Engine":
-    if name not in LOADED:
-        print(f"[musicremover] loading {name}", flush=True)
-        LOADED[name] = engines.ENGINES[name]()
-    eng = LOADED[name]
+    eng = engines.get(name)  # loaded once; combined engines share their parts
     if eng.device != device:
         print(f"[musicremover] {name} -> {device}", flush=True)
         eng.to(device)
