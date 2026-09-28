@@ -1,4 +1,4 @@
-"""Compare music removers on mixes with known ground truth.
+"""Measure BandIt Plus music removal on mixes with known ground truth.
 
 Each test mix = speech + non-music sound effects + background music, built
 from openly licensed clips downloaded from GitHub:
@@ -22,7 +22,7 @@ survives in a model's output:
 Contributions are estimated per STFT bin and 0.4 s block by least squares
 (output ~= sum_i g_i * source_i), like BSS-Eval's allowed distortion.
 
-Usage:  python bench/benchmark.py [--candidates bandit,vocals,...] [--seconds 14]
+Usage:  python bench/benchmark.py [--strengths 0,0.5,1,2,4] [--seconds 14] [--save DIR]
 """
 
 import argparse
@@ -144,107 +144,48 @@ def measure(out, m):
     }
 
 
-def audio_separator_vocals(model_file):
-    """Vocal stem from any model supported by python-audio-separator."""
-    from audio_separator.separator import Separator
-    import tempfile
-    import soundfile as sf
-    sep = Separator(model_file_dir=engines.CACHE, output_dir=tempfile.mkdtemp(), output_format="FLAC",
-                    log_level=40)
-    sep.load_model(model_filename=model_file)
-
-    def run(mix):
-        path = os.path.join(sep.output_dir, "in.wav")
-        sf.write(path, mix.T, SR, subtype="FLOAT")
-        files = sep.separate(path)
-        voc = next(f for f in files if "(Vocals)" in f)
-        y, _ = sf.read(os.path.join(sep.output_dir, voc), dtype="float32")
-        for f in files:
-            os.remove(os.path.join(sep.output_dir, f))
-        return y.T[:, : mix.shape[1]]
-    return run
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seconds", type=float, default=14)
     ap.add_argument("--music-db", type=float, default=-3, help="music level relative to speech")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--candidates", default="bandit,hybrid,vocals,effects+vocals,mdx23c,voc_ft,melband")
+    ap.add_argument("--strengths", default="0,0.5,1,2,4", help="bleed-suppression strengths to compare")
     ap.add_argument("--save", help="directory to write outputs as WAV for listening")
     args = ap.parse_args()
-    want = args.candidates.split(",")
+    strengths = [float(v) for v in args.strengths.split(",")]
     mixes = build_mixes(args.seconds, args.music_db)
+    eng = engines.Engine().to(args.device)
 
-    # Shared building blocks, computed once per mix.
-    cache = {}
-
-    models = {}
-
-    def model(kind):
-        if kind not in models:
-            models[kind] = engines.Model(kind).to(args.device)
-        return models[kind]
-
-    def stems(m):
-        key = ("bandit", id(m))
-        if key not in cache:
-            cache[key] = {k: v.cpu().numpy() for k, v in model("bandit")(torch.from_numpy(m["mix"])).items()}
-        return cache[key]
-
-    def roformer(x, tag, m):
-        key = ("rof", tag, id(m))
-        if key not in cache:
-            cache[key] = model("bs_roformer")(torch.from_numpy(np.ascontiguousarray(x)))["vocals"].cpu().numpy()
-        return cache[key]
-
-    sep_models = {"mdx23c": "MDX23C-8KFFT-InstVoc_HQ.ckpt", "voc_ft": "UVR-MDX-NET-Voc_FT.onnx",
-                  "melband": "mel_band_roformer_kim_ft_unwa.ckpt"}
-    candidates = {
-        "bandit": ("BandIt Plus: speech+effects", lambda m: stems(m)["speech"] + stems(m)["effects"]),
-        "hybrid": ("BandIt Plus + BS-RoFormer vocals of music stem",
-                   lambda m: stems(m)["speech"] + stems(m)["effects"] + roformer(stems(m)["music"], "music", m)),
-        "vocals": ("BS-RoFormer (viperx 1297): vocals", lambda m: roformer(m["mix"], "mix", m)),
-        "effects+vocals": ("BS-RoFormer vocals + BandIt effects",
-                           lambda m: roformer(m["mix"], "mix", m) + stems(m)["effects"]),
-    }
-    for key, f in sep_models.items():
-        if key in want:
-            candidates[key] = (f"{f}: vocals", None)
-
-    results = {}
-    for key in want:
-        label, fn = candidates[key]
-        if fn is None:
-            run = audio_separator_vocals(sep_models[key])
-            fn = lambda m, run=run: run(m["mix"])
-        rows, secs = [], 0.0
-        for m in mixes:
-            t = time.time()
-            out = fn(m)
-            secs += time.time() - t
-            rows.append(measure(out, m))
+    rows = {s: [] for s in strengths}
+    secs = 0.0
+    for m in mixes:
+        t = time.time()
+        stems = eng.stems_of(m["mix"])  # the model runs once per mix; strengths only re-mask
+        secs += time.time() - t
+        keep, music = stems["speech"] + stems["effects"], stems["music"]
+        for s in strengths:
+            out = engines.suppress_bleed(keep, music, s).cpu().numpy()
+            rows[s].append(measure(out, m))
             if args.save:
                 import soundfile as sf
                 os.makedirs(args.save, exist_ok=True)
                 tag = m["name"].split(" ")[0].replace("&", "n")
-                sf.write(os.path.join(args.save, f"{key}_{tag}.wav"), out.T, SR)
+                sf.write(os.path.join(args.save, f"bandit_s{s:g}_{tag}.wav"), out.T, SR)
                 sf.write(os.path.join(args.save, f"_mix_{tag}.wav"), m["mix"].T, SR)
-        avg = {k: float(np.mean([r[k] for r in rows])) for k in rows[0]}
-        avg["time"] = secs / (len(mixes) * args.seconds)
-        results[key] = (label, avg, rows)
-        print(f"{key:15s} " + "  ".join(f"{k} {v:6.1f}" for k, v in avg.items()), flush=True)
+    speed = secs / (len(mixes) * args.seconds)
 
-    print("\n| candidate | what is kept | music left dB ↓ | music-only gap dB ↓ | SFX kept dB (0 best) "
-          "| speech kept dB (0 best) | artifacts dB ↓ | time / audio sec |")
-    print("|---|---|---|---|---|---|---|---|")
-    for key, (label, a, _) in results.items():
-        print(f"| {key} | {label} | {a['music left']:.1f} | {a['music gap']:.1f} | {a['sfx kept']:.1f} "
-              f"| {a['speech kept']:.1f} | {a['artifacts']:.1f} | {a['time']:.2f} s |")
+    print(f"\nBandIt Plus on {args.device}: {speed:.2f} s of compute per second of audio\n")
+    print("| bleed suppression | music left dB ↓ | music-only gap dB ↓ | SFX kept dB (0 best) "
+          "| speech kept dB (0 best) | artifacts dB ↓ |")
+    print("|---|---|---|---|---|---|")
+    for s, rs in rows.items():
+        a = {k: float(np.mean([r[k] for r in rs])) for k in rs[0]}
+        print(f"| {s:g}{' (off)' if s == 0 else ''} | {a['music left']:.1f} | {a['music gap']:.1f} "
+              f"| {a['sfx kept']:.1f} | {a['speech kept']:.1f} | {a['artifacts']:.1f} |")
     print("\nPer mix:")
-    for key, (label, _, rows) in results.items():
-        for m, r in zip(mixes, rows):
-            print(f"  {key:15s} {m['name']:55s} " + "  ".join(f"{k} {v:6.1f}" for k, v in r.items()))
+    for s, rs in rows.items():
+        for m, r in zip(mixes, rs):
+            print(f"  s={s:<4g} {m['name']:55s} " + "  ".join(f"{k} {v:6.1f}" for k, v in r.items()))
 
 
 if __name__ == "__main__":

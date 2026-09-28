@@ -13,10 +13,7 @@ numpy
 pyyaml
 fastapi
 uvicorn
-# BandIt / BS-RoFormer model code (fetched from GitHub on first run) needs:
+# BandIt Plus model code (fetched from GitHub on first run) needs:
 pytorch_lightning
 spafe
 librosa
-einops
-rotary_embedding_torch
-beartype

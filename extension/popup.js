@@ -1,11 +1,12 @@
 const DEFAULTS = {
-  enabled: true, mode: "wait", readySound: true, engine: "bandit", device: "auto",
+  enabled: true, mode: "wait", readySound: true, strength: 1, device: "auto",
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
+// Keyed by strength; numbers from bench/README.md.
 const HINTS = {
-  bandit: "Best balance: removes instruments, keeps dialogue and sound effects. Singing is mostly removed.",
-  hybrid: "Like the first, plus sung vocals are put back. About 3× slower.",
-  vocals: "Cleanest speech, but sound effects are removed along with the music.",
+  0: "Model output as is. Faint music can remain in quiet pauses.",
+  1: "Recommended. Pauses become fully silent and music under speech drops a bit more; effects are practically unchanged.",
+  4: "Slightly less music under speech than Normal, at a small extra cost to effects that overlap music.",
 };
 const $ = (id) => document.getElementById(id);
 
@@ -16,9 +17,10 @@ chrome.storage.sync.get(DEFAULTS, (s) => {
     if (el.type === "checkbox") el.checked = s[k];
     else el.value = s[k];
     el.addEventListener("change", () => {
-      const v = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value;
+      const v = el.type === "checkbox" ? el.checked
+        : el.type === "number" || k === "strength" ? Number(el.value) : el.value;
       chrome.storage.sync.set({ [k]: v }, k === "server" ? checkServer : undefined);
-      if (k === "engine") $("engineHint").textContent = HINTS[v];
+      if (k === "strength") $("strengthHint").textContent = HINTS[v];
     });
   }
   // "device" is stored as auto|cpu and shown as the Force CPU checkbox.
@@ -26,7 +28,7 @@ chrome.storage.sync.get(DEFAULTS, (s) => {
   $("forceCpu").addEventListener("change", () => {
     chrome.storage.sync.set({ device: $("forceCpu").checked ? "cpu" : "auto" }, checkServer);
   });
-  $("engineHint").textContent = HINTS[s.engine];
+  $("strengthHint").textContent = HINTS[s.strength];
   checkServer();
 });
 

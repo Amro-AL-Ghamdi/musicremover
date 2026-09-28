@@ -12,8 +12,8 @@ It has two parts:
   everything except the music. By default it uses **BandIt Plus**, a *cinematic* separation
   model that splits audio into speech / music / sound effects. The server returns
   speech + effects. It runs on your GPU if you have one (NVIDIA CUDA, AMD ROCm or Apple Metal), and
-  the popup has a **Force CPU** switch. See [`bench/`](bench/README.md) for how the available
-  removers compare.
+  the popup has a **Force CPU** switch. [`bench/`](bench/README.md) has the measurements
+  behind these choices.
 
 Everything runs on your machine. No audio leaves your computer.
 
@@ -27,7 +27,7 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
  chunker: init segment + contiguous segments ≈ 60 s  →  a standalone .webm / .mp4 file
         │  bridge.js → background.js → POST http://127.0.0.1:8765/separate
         ▼
- server.py: ffmpeg decode → BandIt Plus → keep speech + effects → Opus
+ server.py: ffmpeg decode → BandIt Plus → keep speech + effects → bleed filter → Opus
         ▼
  inject.js: decodes the chunk and plays it via WebAudio, locked to video.currentTime;
             the <video>'s own audio is routed through a gain node that is set to 0
@@ -66,8 +66,8 @@ follow the table below, then run `pip install -r requirements.txt`.
 
 On first use it downloads the model code (ZFTurbo's MIT-licensed
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
-pinned to a specific commit) and the weights from GitHub releases into `server/.cache/`:
-BandIt Plus is 149 MB, and BS-RoFormer (only needed for the other two removers) is 640 MB.
+pinned to a specific commit) and the BandIt Plus weights (149 MB) from GitHub releases into
+`server/.cache/`.
 
 **GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
@@ -96,22 +96,34 @@ AMD notes:
 * Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
   CPU, or run the server under Linux or WSL2.
 
-**Removers** (chosen in the popup):
+**Why BandIt Plus:** it's a *cinematic* model: it separates dialogue, music and sound
+effects, so effects survive. The popular "bleedless" vocal models (BS-RoFormer, MDX23C, ...)
+separate voice from everything else, so they throw sound effects away with the music, and they
+were also 3.5× slower in our tests. See [`bench/`](bench/README.md).
 
-| Remover | Keeps | Notes |
-|---|---|---|
-| `bandit` (default) | speech + sound effects | BandIt Plus (DnR). Singing mostly goes out with the music. |
-| `hybrid` | speech + effects + singing | Runs BS-RoFormer on BandIt's music stem to put sung vocals back. Slower. |
-| `vocals` | voices only | BS-RoFormer. Cleanest speech, but sound effects are removed too. |
+**Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
+uses BandIt's own music estimate to push leftover music down further. Measured on test mixes
+with known ground truth:
 
-Environment variables: `MR_ENGINE` (default remover), `MR_DEVICE` (pin a device and ignore the
-popup), `MR_PORT` (default `8765`), `MR_OVERLAP` (window overlap, default 2; 4 is marginally
-smoother but twice the work).
+| Setting | Music left | Music in pauses | Sound effects kept | Speech kept |
+|---|---|---|---|---|
+| Off | −19.5 dB | −103 dB | −1.1 dB | −0.8 dB |
+| **Normal** (default) | −20.6 dB | silent | −1.3 dB | −1.0 dB |
+| Strong | −21.2 dB | silent | −1.4 dB | −1.2 dB |
 
-**Speed:** these models are heavy. On a GPU, BandIt runs several times faster than real time
-(the first chunk after starting the server is slow while the model loads). On CPU it runs
-slower than real time: it took ≈5 s per second of audio on a 4-core CPU,
-so with **Pause until ready** you will wait between chunks. A GPU is strongly recommended.
+The filter costs almost nothing to run. It makes pauses fully silent and lowers music under
+speech a little. It can't remove much more than that, because the remaining bleed is music the
+model itself mistakes for speech or effects.
+
+**Speed:** on a GPU the model runs in half precision (fp16) with batches of 8 windows. If fp16
+fails or gives bad output on your card, it switches to full precision automatically and says so in the
+server log. The first chunk after starting the server is slow while the model loads. On CPU
+it runs slower than real time (≈5–6 s per second of audio on a 4-core CPU), so with
+**Pause until ready** you will wait between chunks. A GPU is strongly recommended.
+
+Environment variables: `MR_DEVICE` (pin a device and ignore the popup), `MR_PORT` (default
+`8765`), `MR_FP16=0` (disable half precision), `MR_OVERLAP` (window overlap, default 2),
+`MR_BATCH` (windows per batch, default 8 on GPU, 4 on CPU).
 
 ### 2. Extension
 
@@ -125,11 +137,13 @@ In the toolbar popup you can:
   * **Pause until ready** (default): you never hear the original music
   * **Muted**
   * **Original audio**
-* force the CPU, pick the remover, and turn the "ready" chime on or off
+* force the CPU, set the bleed suppression, and turn the "ready" chime on or off
 * change the chunk length and the server URL
 
 ## Limitations
 
+* Some music bleed remains under speech (about −20 dB, i.e. roughly 1/10 of the original
+  loudness). Singing is usually treated as music and removed.
 * BandIt Plus was trained on film-style mixes (English audiobook speech, general music,
   Freesound effects). Sounds that are part of the music, and music-like effects (sirens,
   bells), can go either way.

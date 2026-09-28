@@ -8,9 +8,9 @@ async function serverUrl() {
   return server.replace(/\/+$/, "");
 }
 
-// engine: which remover to run; device: "auto" (GPU if the server has one) or "cpu".
+// device: "auto" (GPU if the server has one) or "cpu"; strength: bleed suppression.
 async function processingOptions() {
-  return chrome.storage.sync.get({ engine: "bandit", device: "auto" });
+  return chrome.storage.sync.get({ device: "auto", strength: 1 });
 }
 
 function toBase64(bytes) {
@@ -26,8 +26,8 @@ function fromBase64(b64) {
 }
 
 async function separate(msg) {
-  const { engine, device } = await processingOptions();
-  const q = new URLSearchParams({ mime: msg.mime, engine, device });
+  const { device, strength } = await processingOptions();
+  const q = new URLSearchParams({ mime: msg.mime, device, strength: String(strength) });
   const url = `${await serverUrl()}/separate?${q}`;
   const res = await fetch(url, {
     method: "POST",
