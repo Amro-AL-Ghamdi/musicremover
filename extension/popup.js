@@ -6,6 +6,8 @@ const ENGINE_HINTS = {
   bandit: "Removes instruments, keeps dialogue and sound effects. Recommended.",
   demucs: "About 6× faster, but sound effects are removed together with the music.",
   dnr_demucs: "Keeps dialogue and effects like BandIt. Untested model: first use downloads it from Zenodo.",
+  voc_ft: "UVR-MDX-NET-Voc_FT. Fast, with less music under speech than Demucs; sound effects are removed with the music.",
+  melband: "MelBand RoFormer (Kim, fine-tuned by unwa). Least music of all models, but about 5× slower than Voc FT. Removes sound effects.",
 };
 // Numbers from bench/README.md.
 const HINTS = {

@@ -70,6 +70,36 @@ Each doubling of strength lowers the bleed by about 0.4 dB and costs about 0.2�
 speech. A second pass (running Demucs again on its own vocals) doesn't lower the bleed, and it
 weakens the filter, because the second pass sees almost no music. So passes are not offered.
 
+### UVR Voc FT and MelBand RoFormer
+
+Two voice-only models from the UVR community (`--engine voc_ft`, `--engine melband`). For both,
+"other" is the mix minus the vocals, and it drives the filter.
+
+| Model | Strength | Music left | Music gap | SFX kept | Speech kept | Artifacts | CPU s / audio s |
+|---|---|---|---|---|---|---|---|
+| Voc FT | 0 (off) | −24.8 | −46.6 | −20.4 | −0.2 | −22.2 | 2.3 |
+| Voc FT | 4 | −26.5 | −59.3 | −23.6 | −0.6 | −21.7 | |
+| Voc FT | **16 (Normal)** | −26.9 | −69.0 | −25.0 | −1.0 | −21.1 | |
+| Voc FT | **64 (Strong)** | −27.3 | −80.1 | −26.5 | −1.6 | −20.5 | |
+| MelBand | 0 (off) | −26.9 | −116.2 | −27.6 | −0.2 | −23.3 | 11.3 |
+| MelBand | **4 (Normal)** | −28.1 | −144.9 | −29.2 | −0.6 | −22.5 | |
+| MelBand | **16 (Strong)** | −28.0 | −144.9 | −30.3 | −1.1 | −21.5 | |
+| MelBand | 64 | −27.8 | −144.9 | −31.4 | −1.8 | −20.6 | |
+
+MelBand stops improving at strength 4, so its Strong level mainly trades a little speech for
+removing slightly more of whatever is left.
+
+Validation against audio-separator's own implementation, on the same mix:
+
+* MelBand: outputs agree to 29 dB, with identical bleed numbers.
+* Voc FT: outputs agree to 27 dB after volume matching. audio-separator multiplies its output
+  by the input's peak level, which makes its speech look 2.8 dB quieter. Ours keeps the
+  original volume.
+
+Voc FT runs slower here than through audio-separator's onnxruntime path, which measured
+0.94 s/audio s on CPU. We convert the ONNX model to PyTorch so it runs on every GPU backend,
+and we use 2× window overlap.
+
 DnR Demucs (`--engine dnr_demucs`) couldn't be measured: its weights are on Zenodo, which the
 test machine couldn't reach.
 

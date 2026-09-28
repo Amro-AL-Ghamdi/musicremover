@@ -23,3 +23,9 @@ demucs
 omegaconf
 einops
 openunmix
+# UVR Voc FT (ONNX model, converted to PyTorch so it runs on any GPU)
+onnx
+onnx2torch
+# MelBand RoFormer
+rotary_embedding_torch
+beartype
