@@ -67,7 +67,8 @@ follow the table below, then run `pip install -r requirements.txt`.
 On first use it downloads the model code (ZFTurbo's MIT-licensed
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
 pinned to a specific commit) and the weights of the model you pick into `server/.cache/`:
-BandIt Plus 149 MB and Demucs 168 MB (both from GitHub releases), DnR Demucs from Zenodo.
+BandIt Plus 149 MB, Demucs 168 MB, UVR Voc FT 67 MB and MelBand RoFormer 913 MB (all from
+GitHub releases), DnR Demucs from Zenodo.
 
 **GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
@@ -96,13 +97,16 @@ AMD notes:
 * Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
   CPU, or run the server under Linux or WSL2.
 
-**Models** (popup: Model). All three run on the same pipeline and bleed filter:
+**Models** (popup: Model). All five run on the same pipeline and bleed filter. Numbers are at
+the default (Normal) bleed suppression:
 
-| Model | Keeps | Music left under speech | Sound effects | CPU time per audio second |
-|---|---|---|---|---|
-| **BandIt Plus** (default) | speech + sound effects | −20.6 dB | kept (−1.3 dB) | ≈6 s |
-| Demucs | voices only | −24.9 dB | **removed** (−17 dB) | ≈1.4 s |
-| DnR Demucs (experimental) | speech + sound effects | not measured | kept (by design) | not measured |
+| Model | Keeps | Music left under speech | Music in pauses | Sound effects | CPU time per audio second |
+|---|---|---|---|---|---|
+| **BandIt Plus** (default) | speech + sound effects | −20.6 dB | silent | kept (−1.3 dB) | ≈6 s |
+| Demucs | voices only | −24.9 dB | −73 dB | **removed** (−17 dB) | ≈1.4 s |
+| UVR Voc FT | voices only | −26.9 dB | −69 dB | **removed** (−25 dB) | ≈2.3 s |
+| MelBand RoFormer | voices only | **−28.1 dB** | silent | **removed** (−29 dB) | ≈11 s |
+| DnR Demucs (experimental) | speech + sound effects | not measured | not measured | kept (by design) | not measured |
 
 * **BandIt Plus** is a *cinematic* model: it separates dialogue, music and sound effects, so
   effects survive.
@@ -114,13 +118,21 @@ AMD notes:
   test machine couldn't reach, so it is untested. If the automatic download fails, the popup
   badge says where to put `dnr-demucs.ckpt` by hand.
 
-The popular "bleedless" vocal models (BS-RoFormer, MDX23C, ...) were tried and dropped: they
-remove sound effects like Demucs does, and they were 3.5× slower than BandIt. See
-[`bench/`](bench/README.md).
+* **UVR Voc FT** (UVR-MDX-NET-Voc_FT) is the model several music-muting tools use. The ONNX
+  file is converted to PyTorch with `onnx2torch`, so it runs on any GPU PyTorch supports
+  (including AMD). Its output matches audio-separator's to 27 dB after volume matching;
+  audio-separator also scales its output by the input's peak level, which we don't.
+* **MelBand RoFormer** (Kim's vocal model, fine-tuned by unwa) is a newer model from the same
+  UVR community. It leaves the least music of all models here, but it is the slowest.
+
+The voice-only models (Demucs, Voc FT, MelBand) remove sound effects together with the music.
+Only BandIt Plus and DnR Demucs keep them. See [`bench/`](bench/README.md) for all
+measurements, including models that were tried and dropped.
 
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
 uses the model's own music estimate to push leftover music down further. The strength behind
-each level depends on the model, because Demucs keeps improving at much higher settings.
+each level depends on the model (BandIt 1/4, Demucs and Voc FT 16/64, MelBand 4/16), because
+each model stops improving at a different point.
 Measured on test mixes with known ground truth:
 
 | Model, level | Music left | Music in pauses | Sound effects kept | Speech kept |
@@ -131,6 +143,12 @@ Measured on test mixes with known ground truth:
 | Demucs, Off | −22.1 dB | −54 dB | −14.4 dB | −0.1 dB |
 | **Demucs, Normal** (16) | −24.9 dB | −73 dB | −17.4 dB | −0.8 dB |
 | Demucs, Strong (64) | −25.7 dB | −79 dB | −18.9 dB | −1.3 dB |
+| Voc FT, Off | −24.8 dB | −47 dB | −20.4 dB | −0.2 dB |
+| **Voc FT, Normal** (16) | −26.9 dB | −69 dB | −25.0 dB | −1.0 dB |
+| Voc FT, Strong (64) | −27.3 dB | −80 dB | −26.5 dB | −1.6 dB |
+| MelBand, Off | −26.9 dB | −116 dB | −27.6 dB | −0.2 dB |
+| **MelBand, Normal** (4) | −28.1 dB | silent | −29.2 dB | −0.6 dB |
+| MelBand, Strong (16) | −28.0 dB | silent | −30.3 dB | −1.1 dB |
 
 The filter costs almost nothing to run. Past these levels it stops helping: the remaining
 bleed is music the model itself mistakes for speech or effects. Running a model a second time

@@ -14,6 +14,8 @@ const STRENGTHS = {
   bandit: { off: 0, normal: 1, strong: 4 },
   demucs: { off: 0, normal: 16, strong: 64 },
   dnr_demucs: { off: 0, normal: 1, strong: 4 },
+  voc_ft: { off: 0, normal: 16, strong: 64 },
+  melband: { off: 0, normal: 4, strong: 16 },
 };
 
 // engine: model; device: "auto" (GPU if the server has one) or "cpu"; bleed: off|normal|strong.

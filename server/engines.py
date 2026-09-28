@@ -9,6 +9,9 @@
   dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt
               paper). Keeps speech + effects like BandIt. Weights come from
               Zenodo (CC-BY-NC 4.0); experimental.
+  voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; vocals only.
+  melband     MelBand RoFormer (Kim, fine-tuned by unwa). Least music bleed of
+              all models tested, but the slowest; vocals only.
 
 Shared on top of every model:
 
@@ -40,6 +43,8 @@ MSST_REPO = "https://github.com/ZFTurbo/Music-Source-Separation-Training.git"
 MSST_COMMIT = "84b1eac0887756b4f1a9d7a1ff49105939749ed2"
 MSST_REL = "https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download"
 DNR_DEMUCS_URL = "https://zenodo.org/api/records/10160698/files/dnr-demucs.ckpt/content"
+UVR_REL = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models"
+SEPARATOR_REL = "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs"
 
 
 def _fetch(url: str, name: str = None) -> str:
@@ -238,4 +243,71 @@ class DnRDemucsEngine(Engine):
         return y.reshape(B, C, len(self.stems), T).transpose(1, 2)
 
 
-ENGINES = {"bandit": BanditEngine, "demucs": DemucsEngine, "dnr_demucs": DnRDemucsEngine}
+class _VocalsOnly(Engine):
+    """Single-target vocal models: 'other' is the mix minus the vocals."""
+
+    keep_stems = ("vocals",)
+    music_stems = ("other",)
+
+    def vocals(self, b: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+    def run(self, b: torch.Tensor) -> torch.Tensor:
+        v = self.vocals(b)
+        return torch.stack([v, b - v], dim=1)  # [B, 2 stems, C, T]
+
+
+class VocFTEngine(_VocalsOnly):
+    """UVR-MDX-NET-Voc_FT (UVR). The ONNX model is converted to PyTorch with
+    onnx2torch so it runs on any GPU PyTorch supports, including AMD ROCm."""
+
+    # From UVR's mdx_model_data.json for this model.
+    N_FFT, HOP, DIM_F, DIM_T, COMPENSATE = 7680, 1024, 3072, 256, 1.021
+
+    def __init__(self):
+        super().__init__()
+        import onnx
+        from onnx2torch import convert
+        self.net = convert(onnx.load(_fetch(f"{UVR_REL}/UVR-MDX-NET-Voc_FT.onnx"))).eval()
+        self.stems = ["vocals", "other"]
+        self.chunk = self.HOP * (self.DIM_T - 1)  # 261120 samples -> exactly 256 STFT frames
+
+    def vocals(self, b: torch.Tensor) -> torch.Tensor:
+        B, C, T = b.shape
+        win = torch.hann_window(self.N_FFT, periodic=True, device=b.device)
+        spec = torch.stft(b.reshape(B * C, T).float(), self.N_FFT, self.HOP, window=win,
+                          center=True, return_complex=True)                   # [B*C, F, 256]
+        x = torch.view_as_real(spec).permute(0, 3, 1, 2)                     # [B*C, 2, F, 256]
+        x = x.reshape(B, C * 2, -1, x.shape[-1])[:, :, :self.DIM_F].clone()   # [B, 4, 3072, 256]
+        x[:, :, :3] = 0  # UVR zeroes the lowest bins (< ~17 Hz) before the model
+        y = self.net(x).float()
+        y = torch.nn.functional.pad(y, (0, 0, 0, self.N_FFT // 2 + 1 - self.DIM_F))
+        y = y.reshape(B * C, 2, -1, y.shape[-1]).permute(0, 2, 3, 1).contiguous()
+        v = torch.istft(torch.view_as_complex(y), self.N_FFT, self.HOP, window=win,
+                        center=True, length=T)
+        return v.reshape(B, C, T) * self.COMPENSATE
+
+
+class MelBandEngine(_VocalsOnly):
+    """MelBand RoFormer, Kim's vocal model fine-tuned by unwa. Least bleed of the
+    models tested, but about 5x slower than Voc_FT."""
+
+    def __init__(self):
+        super().__init__()
+        _msst()
+        with open(_fetch(f"{SEPARATOR_REL}/config_mel_band_roformer_kim_ft_unwa.yaml")) as f:
+            cfg = yaml.load(f, Loader=yaml.FullLoader)
+        from models.bs_roformer.mel_band_roformer import MelBandRoformer
+        self.net = MelBandRoformer(**cfg["model"])
+        self.net.load_state_dict(_state_dict(_fetch(f"{SEPARATOR_REL}/mel_band_roformer_kim_ft_unwa.ckpt")))
+        self.net.eval()
+        self.stems = ["vocals", "other"]
+        self.chunk = int(cfg["audio"]["chunk_size"])
+
+    def vocals(self, b: torch.Tensor) -> torch.Tensor:
+        v = self.net(b)
+        return v if v.dim() == 3 else v[:, 0]  # [B, C, T]
+
+
+ENGINES = {"bandit": BanditEngine, "demucs": DemucsEngine, "dnr_demucs": DnRDemucsEngine,
+           "voc_ft": VocFTEngine, "melband": MelBandEngine}
