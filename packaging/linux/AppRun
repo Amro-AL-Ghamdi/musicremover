@@ -1,0 +1,36 @@
+#!/bin/sh
+# Music Remover for Linux (AppImage, or run.sh in the .tar.gz): starts the local server.
+# The app itself is read-only. PyTorch for your GPU and the models are downloaded on the
+# first start into ~/.local/share/musicremover, along with a copy of the extension.
+HERE="$(dirname "$(readlink -f "$0")")"
+
+# Started by double-clicking (no terminal): reopen in a terminal so the log is visible
+# and closing the window stops the server.
+if [ ! -t 1 ] && [ -z "$MR_IN_TERMINAL" ]; then
+  export MR_IN_TERMINAL=1
+  SELF="${APPIMAGE:-$HERE/AppRun}"
+  for t in x-terminal-emulator gnome-terminal konsole xfce4-terminal kitty alacritty foot xterm; do
+    command -v "$t" >/dev/null 2>&1 || continue
+    case "$t" in
+      gnome-terminal) exec "$t" -- "$SELF" "$@" ;;
+      xfce4-terminal) exec "$t" -x "$SELF" "$@" ;;
+      kitty|foot) exec "$t" "$SELF" "$@" ;;
+      *) exec "$t" -e "$SELF" "$@" ;;
+    esac
+  done
+fi
+
+export MR_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/musicremover"
+export MR_CACHE="$MR_HOME/models"
+# PyTorch goes to the data folder (pip --user) and is found there at run time.
+export PYTHONUSERBASE="$MR_HOME/python"
+export PIP_USER=1
+unset PYTHONHOME PYTHONPATH PYTHONNOUSERSITE
+
+"$HERE/python/bin/python3" "$HERE/app/server/launcher.py" "$@"
+status=$?
+if [ -n "$MR_IN_TERMINAL" ] && [ "$status" -ne 0 ]; then
+  printf '\nMusic Remover stopped with an error (see above). Press Enter to close.'
+  read -r _
+fi
+exit "$status"

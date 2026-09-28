@@ -61,6 +61,31 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 
 ## Quick start
 
+### Download the app (no Python needed)
+
+1. **Download** from the [latest release](https://github.com/siba1426/musicremover/releases/latest):
+   * Windows: **`MusicRemover-Setup.exe`**. Run it; no admin rights needed. Windows may warn
+     that the installer isn't signed: click **More info → Run anyway**.
+   * Linux: **`MusicRemover-x86_64.AppImage`**. Make it executable (`chmod +x`, or
+     Properties → Permissions) and double-click it. Or use `MusicRemover-linux-x86_64.tar.gz`:
+     unpack it and run `./run.sh`.
+2. **Start Music Remover** (Start menu / desktop on Windows, the AppImage on Linux). The first
+   start finds your GPU and downloads the matching PyTorch (1–3 GB, or ~200 MB for the CPU
+   build) and the models. Later starts take a few seconds. Leave the window open while you
+   watch; closing it stops the server.
+3. **Load the extension** once: the window prints the extension folder
+   (`%LOCALAPPDATA%\MusicRemover\extension` on Windows, `~/.local/share/musicremover/extension`
+   on Linux). Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**,
+   click **Load unpacked** and pick that folder.
+4. Open a YouTube video. Already-open YouTube tabs are picked up automatically.
+
+The app contains Python and every dependency except PyTorch, which depends on your GPU.
+PyTorch, the models and the extension copy go to the folder above; uninstalling on Windows
+removes it, on Linux delete it yourself. After installing a newer version, reload the
+extension in `chrome://extensions`.
+
+### Or install from source
+
 1. **Download** this repository: `git clone https://github.com/siba1426/musicremover.git`, or on
    GitHub click **Code → Download ZIP** and unzip it.
 2. **Install** (needs [Python](https://www.python.org/downloads/) 3.9+; on Windows tick
@@ -70,8 +95,8 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 
    It finds your GPU (NVIDIA, AMD, Apple Silicon) and installs the matching PyTorch, or the
    small CPU-only build if there's no usable GPU. It also installs everything else and downloads
-   the default model, then starts the server. Nothing else is needed: ffmpeg comes bundled if
-   you don't have it, and git is optional.
+   the default models, then starts the server. Nothing else is needed: ffmpeg comes bundled if
+   you don't have it.
 3. **Next time, start the server** with **`run.bat`** (Windows) or **`./run.sh`**, and leave it
    running while you watch.
 4. **Load the extension** once: open `chrome://extensions` (or `edge://extensions`), turn on
@@ -96,7 +121,7 @@ python server.py
 ```
 
 ffmpeg is taken from your PATH if installed, otherwise from the bundled `imageio-ffmpeg`
-package. The model code is fetched with git if available, otherwise as a zip from GitHub.
+package.
 
 `install.py` picks the PyTorch build for your hardware: CUDA 13.0 or 12.6 for NVIDIA (based on
 your driver version), ROCm for AMD, Metal for Apple Silicon, or the small CPU-only build.
@@ -232,3 +257,20 @@ In the toolbar popup you can:
 `MediaSource`/`SourceBuffer` before YouTube's player loads. `bridge.js` (isolated world) relays
 messages to `background.js`, which makes the localhost request. Doing that from the
 service worker avoids YouTube's CSP and the browser's local-network restrictions.
+
+### Building the app
+
+`packaging/build.py` builds the downloadable app: a portable Python
+([python-build-standalone](https://github.com/astral-sh/python-build-standalone), pinned) with
+every dependency except PyTorch, plus the server and the extension. PyTorch is left out
+because the right build depends on the user's GPU; the first start installs it with
+`pip --user` into the data folder (`MR_HOME`, `PYTHONUSERBASE`), which also holds the models.
+
+```bash
+python packaging/build.py linux     # dist/MusicRemover-x86_64.AppImage + .tar.gz
+python packaging/build.py windows   # then: ISCC.exe packaging\windows\musicremover.iss
+```
+
+Each target has to be built on its own OS. `.github/workflows/release.yml` builds both, plus
+the Windows installer (Inno Setup), and pushing a tag like `v1.0.0` attaches them to a
+GitHub release.

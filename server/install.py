@@ -192,7 +192,8 @@ def pip(*args, dry):
 
 # pip unpacks the multi-GB PyTorch wheels in the temp folder. On many Linux systems /tmp
 # is in RAM (tmpfs), which can run out and crash the install, so use a folder on disk.
-TMP = os.path.join(HERE, ".cache", "tmp")
+# (The downloadable app's own folder is read-only; it sets MR_HOME to a writable one.)
+TMP = os.path.join(os.environ.get("MR_HOME") or os.path.join(HERE, ".cache"), "tmp")
 
 
 def use_disk_temp():
@@ -276,11 +277,12 @@ def install(args, candidates, kind):
         if r.returncode != 0:
             print("  Couldn't download it now; the server will try again on first use.")
 
-    ext = os.path.join(os.path.dirname(HERE), "extension")
-    print(f"""
-Done.
+    ext = os.environ.get("MR_EXTENSION") or os.path.join(os.path.dirname(HERE), "extension")
+    start = ("" if os.environ.get("MR_HOME") else """
   Start the server:   run.sh (Linux/macOS) or run.bat (Windows) in the project folder.
-                      (install.sh / install.bat start it for you right after installing.)
+                      (install.sh / install.bat start it for you right after installing.)""")
+    print(f"""
+Done.{start}
   Load the extension once:
     1. open chrome://extensions (or edge://extensions)
     2. turn on "Developer mode" (top right)
