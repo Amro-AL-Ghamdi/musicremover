@@ -1,7 +1,8 @@
 # Benchmark
 
 `benchmark.py` builds test mixes where every part is known (speech + non-music sound
-effects + background music), runs BandIt Plus on them, and measures how much of each part
+effects + background music), runs a model on them (`--engine`, default Voc FT + DnR Demucs),
+and measures how much of each part
 survives. Because the ground truth is known, "bleed" is measured directly instead of judged
 by ear.
 
@@ -35,6 +36,10 @@ Each source's contribution is estimated per frequency bin and 0.4 s block by lea
 for SFX and speech. Adding 10% of the music back scores exactly −20 dB.
 
 ## Results (4-core CPU, 3 mixes)
+
+The server now ships only UVR Voc FT, DnR Demucs and their combination (the default).
+Results for BandIt Plus, HTDemucs and MelBand RoFormer are kept below for comparison;
+those models were removed.
 
 ### Bleed suppression
 

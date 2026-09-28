@@ -1,14 +1,11 @@
 const DEFAULTS = {
-  enabled: true, mode: "wait", readySound: true, engine: "bandit", bleed: "normal", device: "auto",
+  enabled: true, mode: "wait", readySound: true, engine: "voc_ft_dnr", bleed: "normal", device: "auto",
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
 const ENGINE_HINTS = {
-  bandit: "Removes instruments, keeps dialogue and sound effects. Recommended.",
-  demucs: "About 6× faster, but sound effects are removed together with the music.",
-  dnr_demucs: "Keeps dialogue and effects like BandIt. Untested model: first use downloads it from Zenodo.",
-  voc_ft: "UVR-MDX-NET-Voc_FT. Fast, with less music under speech than Demucs; sound effects are removed with the music.",
-  melband: "MelBand RoFormer (Kim, fine-tuned by unwa). Least music of all models, but about 5× slower than Voc FT. Removes sound effects.",
-  voc_ft_dnr: "Voices from Voc FT plus sound effects from DnR Demucs. Runs both models (about 1.4× Voc FT alone). Untested: first use downloads DnR Demucs from Zenodo.",
+  voc_ft_dnr: "Voices from Voc FT plus sound effects from DnR Demucs. Recommended. Runs both models (about 1.4× Voc FT alone).",
+  voc_ft: "UVR-MDX-NET-Voc_FT alone. Fastest, but sound effects are removed together with the music.",
+  dnr_demucs: "DnR Demucs alone: keeps dialogue and sound effects, with more music left under speech than the mix.",
 };
 // Numbers from bench/README.md.
 const HINTS = {

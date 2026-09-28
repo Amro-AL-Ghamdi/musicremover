@@ -1,18 +1,12 @@
 """Music removal models. Each engine takes stereo float32 audio [2, T] at
 44.1 kHz and returns what should be *kept*, same shape.
 
-  bandit      BandIt Plus (default). Cinematic model trained on DnR: splits
-              speech / music / effects; keeps speech + effects.
-  demucs      HTDemucs fine-tuned for vocals (MVSep weights, via MSST). About
-              6x faster than BandIt, but it splits vocals / everything else,
-              so sound effects are removed together with the music.
-  dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt
-              paper). Keeps speech + effects like BandIt. Weights come from
-              Zenodo (CC-BY-NC 4.0); experimental.
-  voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; vocals only.
-  melband     MelBand RoFormer (Kim, fine-tuned by unwa). Least music bleed of
-              all models tested, but the slowest; vocals only.
-  voc_ft_dnr  Voices from voc_ft + sound effects from dnr_demucs (experimental).
+  voc_ft_dnr  (default) Voices from voc_ft + sound effects from dnr_demucs.
+  voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound effects
+              are removed together with the music.
+  dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt paper):
+              splits speech / music / effects; keeps speech + effects. Weights
+              come from Zenodo (CC-BY-NC 4.0).
 
 Shared on top of every model:
 
@@ -27,28 +21,17 @@ Shared on top of every model:
 
 import os
 import shutil
-import subprocess
-import sys
-import tempfile
-import types
 import urllib.request
-import zipfile
 
 import numpy as np
 import torch
-import yaml
 
 SR = 44100
 CACHE = os.environ.get("MR_CACHE", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache"))
 DEFAULT_STRENGTH = 1.0
 
-# Model code comes from ZFTurbo/Music-Source-Separation-Training (MIT), pinned.
-MSST_REPO = "https://github.com/ZFTurbo/Music-Source-Separation-Training.git"
-MSST_COMMIT = "84b1eac0887756b4f1a9d7a1ff49105939749ed2"
-MSST_REL = "https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download"
 DNR_DEMUCS_URL = "https://zenodo.org/api/records/10160698/files/dnr-demucs.ckpt/content"
 UVR_REL = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models"
-SEPARATOR_REL = "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs"
 
 
 def _fetch(url: str, name: str = None) -> str:
@@ -72,48 +55,6 @@ def ffmpeg_exe() -> str:
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception as e:
         raise RuntimeError("ffmpeg not found: install it, or `pip install imageio-ffmpeg`") from e
-
-
-def _fetch_msst_zip(path: str):
-    """Download the pinned MSST commit as a zip (no git needed)."""
-    url = f"{MSST_REPO[:-4]}/archive/{MSST_COMMIT}.zip"
-    print(f"[musicremover] downloading {url}", flush=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        archive = os.path.join(tmp, "msst.zip")
-        urllib.request.urlretrieve(url, archive)
-        with zipfile.ZipFile(archive) as z:
-            z.extractall(tmp)
-        top = next(d for d in os.listdir(tmp) if d.startswith("Music-Source-Separation-Training"))
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-        shutil.move(os.path.join(tmp, top), path)
-
-
-def _msst() -> str:
-    path = os.path.join(CACHE, "msst")
-    if not os.path.isdir(os.path.join(path, "models")):
-        print("[musicremover] fetching model code (MSST)", flush=True)
-        os.makedirs(CACHE, exist_ok=True)
-        try:
-            if not shutil.which("git"):
-                raise OSError("git not installed")
-            os.makedirs(path, exist_ok=True)
-            run = lambda *a: subprocess.run(["git", "-C", path, *a], check=True, capture_output=True)
-            run("init", "-q")
-            run("fetch", "-q", "--depth", "1", MSST_REPO, MSST_COMMIT)
-            run("checkout", "-q", "FETCH_HEAD")
-        except (OSError, subprocess.CalledProcessError):
-            _fetch_msst_zip(path)
-    if path not in sys.path:
-        sys.path.insert(0, path)
-    # Register the packages without running their __init__, which imports
-    # the whole training stack (asteroid, wandb, ...). Inference doesn't need it.
-    for name in ("models", "models.bandit", "models.bandit.core"):
-        if name not in sys.modules:
-            m = types.ModuleType(name)
-            m.__path__ = [os.path.join(path, *name.split("."))]
-            sys.modules[name] = m
-    return path
 
 
 def _state_dict(path: str) -> dict:
@@ -232,41 +173,6 @@ class Engine:
         return out.cpu().numpy()
 
 
-class BanditEngine(Engine):
-    keep_stems = ("speech", "effects")
-    music_stems = ("music",)
-
-    def __init__(self):
-        super().__init__()
-        _msst()
-        cfg_path = _fetch(f"{MSST_REL}/v.1.0.3/config_dnr_bandit_bsrnn_multi_mus64.yaml")
-        with open(cfg_path) as f:
-            cfg = yaml.load(f, Loader=yaml.FullLoader)
-        from models.bandit.core.model import MultiMaskMultiSourceBandSplitRNNSimple
-        self.net = MultiMaskMultiSourceBandSplitRNNSimple(**cfg["model"])
-        self.net.load_state_dict(_state_dict(_fetch(f"{MSST_REL}/v.1.0.3/model_bandit_plus_dnr_sdr_11.47.chpt")))
-        self.net.eval()
-        self.stems = list(cfg["model"]["stems"])  # speech, music, effects
-        self.chunk = int(cfg["audio"]["chunk_size"])
-
-
-class DemucsEngine(Engine):
-    keep_stems = ("vocals",)
-    music_stems = ("other",)
-
-    def __init__(self):
-        super().__init__()
-        msst = _msst()
-        from omegaconf import OmegaConf
-        cfg = OmegaConf.load(os.path.join(msst, "configs", "config_vocals_htdemucs.yaml"))
-        from models.demucs4ht import get_model
-        self.net = get_model(cfg)
-        self.net.load_state_dict(_state_dict(_fetch(f"{MSST_REL}/v1.0.0/model_vocals_htdemucs_sdr_8.78.ckpt")))
-        self.net.eval()
-        self.stems = list(cfg.training.instruments)  # vocals, other
-        self.chunk = int(cfg.audio.chunk_size)       # 11 s, the length it was trained on
-
-
 class DnRDemucsEngine(Engine):
     keep_stems = ("speech", "effects")
     music_stems = ("music",)
@@ -341,29 +247,8 @@ class VocFTEngine(_VocalsOnly):
         return v.reshape(B, C, T) * self.COMPENSATE
 
 
-class MelBandEngine(_VocalsOnly):
-    """MelBand RoFormer, Kim's vocal model fine-tuned by unwa. Least bleed of the
-    models tested, but about 5x slower than Voc_FT."""
-
-    def __init__(self):
-        super().__init__()
-        _msst()
-        with open(_fetch(f"{SEPARATOR_REL}/config_mel_band_roformer_kim_ft_unwa.yaml")) as f:
-            cfg = yaml.load(f, Loader=yaml.FullLoader)
-        from models.bs_roformer.mel_band_roformer import MelBandRoformer
-        self.net = MelBandRoformer(**cfg["model"])
-        self.net.load_state_dict(_state_dict(_fetch(f"{SEPARATOR_REL}/mel_band_roformer_kim_ft_unwa.ckpt")))
-        self.net.eval()
-        self.stems = ["vocals", "other"]
-        self.chunk = int(cfg["audio"]["chunk_size"])
-
-    def vocals(self, b: torch.Tensor) -> torch.Tensor:
-        v = self.net(b)
-        return v if v.dim() == 3 else v[:, 0]  # [B, C, T]
-
-
 class VocFTDnREngine(Engine):
-    """Voices from UVR Voc FT + sound effects from DnR Demucs (experimental).
+    """Voices from UVR Voc FT + sound effects from DnR Demucs (the default).
 
     Voc FT has no effects stem (its "other" is music and effects together), and DnR
     Demucs separates effects from music. Combining them keeps Voc FT's voices and adds
@@ -416,8 +301,8 @@ class VocFTDnREngine(Engine):
         return voices + effects
 
 
-ENGINES = {"bandit": BanditEngine, "demucs": DemucsEngine, "dnr_demucs": DnRDemucsEngine,
-           "voc_ft": VocFTEngine, "melband": MelBandEngine, "voc_ft_dnr": VocFTDnREngine}
+ENGINES = {"voc_ft_dnr": VocFTDnREngine, "voc_ft": VocFTEngine, "dnr_demucs": DnRDemucsEngine}
+DEFAULT_ENGINE = "voc_ft_dnr"
 
 _loaded: dict = {}
 

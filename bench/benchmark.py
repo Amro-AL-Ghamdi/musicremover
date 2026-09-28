@@ -1,4 +1,4 @@
-"""Measure BandIt Plus music removal on mixes with known ground truth.
+"""Measure music removal on mixes with known ground truth.
 
 Each test mix = speech + non-music sound effects + background music, built
 from openly licensed clips downloaded from GitHub:
@@ -22,7 +22,7 @@ survives in a model's output:
 Contributions are estimated per STFT bin and 0.4 s block by least squares
 (output ~= sum_i g_i * source_i), like BSS-Eval's allowed distortion.
 
-Usage:  python bench/benchmark.py [--engine bandit|demucs|dnr_demucs] [--strengths 0,1,4]
+Usage:  python bench/benchmark.py [--engine voc_ft_dnr|voc_ft|dnr_demucs] [--strengths 0,4,16]
                                  [--passes 1,2] [--seconds 14] [--save DIR]
 """
 
@@ -150,7 +150,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=14)
     ap.add_argument("--music-db", type=float, default=-3, help="music level relative to speech")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--engine", default="bandit", choices=sorted(engines.ENGINES))
+    ap.add_argument("--engine", default=engines.DEFAULT_ENGINE, choices=sorted(engines.ENGINES))
     ap.add_argument("--strengths", default="0,0.5,1,2,4", help="bleed-suppression strengths to compare")
     ap.add_argument("--passes", default="1", help="model passes to compare, e.g. 1,2")
     ap.add_argument("--save", help="directory to write outputs as WAV for listening")

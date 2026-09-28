@@ -4,7 +4,7 @@
   const TAG = "__musicremover__";
   // engine + bleed are passed along so the page can re-process chunks when they change.
   const DEFAULTS = { enabled: true, mode: "wait", chunkSeconds: 60, firstChunkSeconds: 20, readySound: true,
-                     engine: "bandit", bleed: "normal" };
+                     engine: "voc_ft_dnr", bleed: "normal" };
 
   const pushSettings = () =>
     chrome.storage.sync.get(DEFAULTS, (settings) => window.postMessage({ [TAG]: "settings", settings }, "*"));

@@ -9,9 +9,9 @@ It has two parts:
   player has already downloaded into its buffer, cuts it into ~1 minute chunks, sends them
   to the local server, and plays the returned music-free audio in sync with the video.
 * **`server/`**: a small local Python server that runs a source-separation model and returns
-  everything except the music. By default it uses **BandIt Plus**, a *cinematic* separation
-  model that splits audio into speech / music / sound effects. The server returns
-  speech + effects. It runs on your GPU if you have one (NVIDIA CUDA, AMD ROCm or Apple Metal), and
+  everything except the music. By default it combines two models: **UVR Voc FT** for the
+  voices and **DnR Demucs**, a *cinematic* model that splits audio into speech / music /
+  sound effects, for the effects. The server returns voices + effects. It runs on your GPU if you have one (NVIDIA CUDA, AMD ROCm or Apple Metal), and
   the popup has a **Force CPU** switch. [`bench/`](bench/README.md) has the measurements
   behind these choices.
 
@@ -27,7 +27,7 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
  chunker: init segment + contiguous segments ≈ 60 s  →  a standalone .webm / .mp4 file
         │  bridge.js → background.js → POST http://127.0.0.1:8765/separate
         ▼
- server.py: ffmpeg decode → BandIt Plus → keep speech + effects → bleed filter → Opus
+ server.py: ffmpeg decode → Voc FT + DnR Demucs → keep voices + effects → bleed filter → Opus
         ▼
  inject.js: decodes the chunk and plays it via WebAudio, locked to video.currentTime;
             the <video>'s own audio is routed through a gain node that is set to 0
@@ -110,11 +110,8 @@ small for the PyTorch wheels); the folder is deleted afterwards. Use `--dry-run`
 `--target cpu|nvidia|amd|apple` to override the detection. To install by hand instead,
 follow the table below, then run `pip install -r requirements.txt`.
 
-On first use it downloads the model code (ZFTurbo's MIT-licensed
-[Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
-pinned to a specific commit) and the weights of the model you pick into `server/.cache/`:
-BandIt Plus 149 MB, Demucs 168 MB, UVR Voc FT 67 MB and MelBand RoFormer 913 MB (all from
-GitHub releases), DnR Demucs from Zenodo. Voc FT + DnR Demucs uses the Voc FT and DnR Demucs files.
+The installer downloads the model weights into `server/.cache/`: UVR Voc FT (67 MB, from UVR's
+GitHub releases) and DnR Demucs (from Zenodo). The default Voc FT + DnR Demucs option uses both files.
 
 **GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
@@ -143,69 +140,48 @@ AMD notes:
 * Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
   CPU, or run the server under Linux or WSL2.
 
-**Models** (popup: Model). All six run on the same pipeline and bleed filter. Numbers are at
+**Models** (popup: Model). All three run on the same pipeline and bleed filter. Numbers are at
 the default (Normal) bleed suppression:
 
 | Model | Keeps | Music left under speech | Music in pauses | Sound effects | CPU time per audio second |
 |---|---|---|---|---|---|
-| **BandIt Plus** (default) | speech + sound effects | −20.6 dB | silent | kept (−1.3 dB) | ≈6 s |
-| Demucs | voices only | −24.9 dB | −73 dB | **removed** (−17 dB) | ≈1.4 s |
-| UVR Voc FT | voices only | −26.9 dB | −69 dB | **removed** (−25 dB) | ≈2.3 s |
-| MelBand RoFormer | voices only | **−28.1 dB** | silent | **removed** (−29 dB) | ≈11 s |
-| DnR Demucs (experimental) | speech + sound effects | −18.5 dB | −56 dB | kept (−1.5 dB) | ≈1.3 s |
-| Voc FT + DnR Demucs (experimental) | voices + sound effects | −18.8 dB¹ | −48 dB¹ | **kept (−0.6 dB)** | ≈4 s (0.56 s on an RX 9060 XT) |
+| **Voc FT + DnR Demucs** (default) | voices + sound effects | −18.8 dB¹ | −48 dB¹ | **kept (−0.6 dB)** | ≈4 s (0.56 s on an RX 9060 XT) |
+| UVR Voc FT | voices only | **−26.9 dB** | −69 dB | **removed** (−25 dB) | ≈2.3 s |
+| DnR Demucs | speech + sound effects | −18.5 dB | −56 dB | kept (−1.5 dB) | ≈1.3 s |
 
 ¹ Measured with the earlier single filter. Each part now has its own filter (see below), which
 should improve both; re-run the benchmark to get current numbers.
 
-* **BandIt Plus** is a *cinematic* model: it separates dialogue, music and sound effects, so
-  effects survive.
-* **Demucs** (HTDemucs fine-tuned for vocals) is about 4× faster and leaves less music under
-  speech. It sorts audio into "vocals" and "everything else", though, so sound effects go with
-  the music. Pick it when you only care about voices.
-* **DnR Demucs** is the Hybrid Demucs baseline from the BandIt paper, trained on the same
-  dialogue/music/effects data as BandIt. Its weights are on Zenodo (CC-BY-NC 4.0), which our
-  test machine couldn't reach, so it is untested. If the automatic download fails, the popup
-  badge says where to put `dnr-demucs.ckpt` by hand.
-
-* **UVR Voc FT** (UVR-MDX-NET-Voc_FT) is the model several music-muting tools use. The ONNX
-  file is converted to PyTorch with `onnx2torch`, so it runs on any GPU PyTorch supports
-  (including AMD). Its output matches audio-separator's to 27 dB after volume matching;
-  audio-separator also scales its output by the input's peak level, which we don't.
-* **MelBand RoFormer** (Kim's vocal model, fine-tuned by unwa) is a newer model from the same
-  UVR community. It leaves the least music of all models here, but it is the slowest.
 * **Voc FT + DnR Demucs** combines the two: voices from Voc FT, sound effects from DnR Demucs
   (Voc FT has no effects stem; its "other" is music and effects together). It keeps effects and
-  speech better than any other model tested. Both models run on every chunk, and they're shared
-  with the standalone options, so nothing loads twice. Each part is filtered by the model it came
-  from: voices with Voc FT's own estimate (at 4× the strength), effects with DnR's music
-  estimate. Measure it with `python bench/benchmark.py --engine voc_ft_dnr`.
+  speech best. Both models run on every chunk, and they're shared with the standalone options,
+  so nothing loads twice. Each part is filtered by the model it came from: voices with Voc FT's
+  own estimate (at 4× the strength), effects with DnR's music estimate. Measure it with
+  `python bench/benchmark.py --engine voc_ft_dnr`.
+* **UVR Voc FT** (UVR-MDX-NET-Voc_FT) is the model several music-muting tools use. It leaves the
+  least music, but it sorts audio into "vocals" and "everything else", so sound effects go with
+  the music. The ONNX file is converted to PyTorch with `onnx2torch`, so it runs on any GPU
+  PyTorch supports (including AMD). Its output matches audio-separator's to 27 dB after volume
+  matching; audio-separator also scales its output by the input's peak level, which we don't.
+* **DnR Demucs** is the Hybrid Demucs baseline from the BandIt paper, trained on
+  dialogue/music/effects mixes (DnR). Its weights are on Zenodo (CC-BY-NC 4.0). If the automatic
+  download fails, the popup badge says where to put `dnr-demucs.ckpt` by hand.
 
-The voice-only models (Demucs, Voc FT, MelBand) remove sound effects together with the music.
-BandIt Plus, DnR Demucs and Voc FT + DnR Demucs keep them. See [`bench/`](bench/README.md) for all
-measurements, including models that were tried and dropped.
+See [`bench/`](bench/README.md) for all measurements, including models that were tried and
+dropped (BandIt Plus, HTDemucs, MelBand RoFormer and others).
 
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
 uses the model's own music estimate to push leftover music down further. The strength behind
-each level depends on the model (BandIt and DnR Demucs 1/4, Demucs and Voc FT 16/64, MelBand
-4/16, Voc FT + DnR 4/16 for effects and 16/64 for voices), because each model stops improving
+each level depends on the model (Voc FT + DnR 4/16 for effects and 16/64 for voices, Voc FT
+16/64, DnR Demucs 1/4), because each model stops improving
 at a different point.
 Measured on test mixes with known ground truth:
 
 | Model, level | Music left | Music in pauses | Sound effects kept | Speech kept |
 |---|---|---|---|---|
-| BandIt Plus, Off | −19.5 dB | −103 dB | −1.1 dB | −0.8 dB |
-| **BandIt Plus, Normal** (1) | −20.6 dB | silent | −1.3 dB | −1.0 dB |
-| BandIt Plus, Strong (4) | −21.2 dB | silent | −1.4 dB | −1.2 dB |
-| Demucs, Off | −22.1 dB | −54 dB | −14.4 dB | −0.1 dB |
-| **Demucs, Normal** (16) | −24.9 dB | −73 dB | −17.4 dB | −0.8 dB |
-| Demucs, Strong (64) | −25.7 dB | −79 dB | −18.9 dB | −1.3 dB |
 | Voc FT, Off | −24.8 dB | −47 dB | −20.4 dB | −0.2 dB |
 | **Voc FT, Normal** (16) | −26.9 dB | −69 dB | −25.0 dB | −1.0 dB |
 | Voc FT, Strong (64) | −27.3 dB | −80 dB | −26.5 dB | −1.6 dB |
-| MelBand, Off | −26.9 dB | −116 dB | −27.6 dB | −0.2 dB |
-| **MelBand, Normal** (4) | −28.1 dB | silent | −29.2 dB | −0.6 dB |
-| MelBand, Strong (16) | −28.0 dB | silent | −30.3 dB | −1.1 dB |
 
 The filter costs almost nothing to run. Past these levels it stops helping: the remaining
 bleed is music the model itself mistakes for speech or effects. Running a model a second time
@@ -214,8 +190,9 @@ on its own output was also tested and didn't lower the bleed.
 **Speed:** on a GPU the model runs in half precision (fp16) with batches of 8 windows. If fp16
 fails or gives bad output on your card, it switches to full precision automatically and says so in the
 server log. The first chunk after starting the server (or switching models) is slow while the
-model loads. On CPU, BandIt runs slower than real time (≈6 s per second of audio on a 4-core
-CPU), so with **Pause until ready** you will wait between chunks; Demucs is about 4× faster.
+model loads. On CPU, the default runs slower than real time (≈4 s per second of audio on a
+4-core CPU), so with **Pause until ready** you will wait between chunks; Voc FT or DnR Demucs
+alone are faster.
 A GPU is strongly recommended.
 
 Environment variables: `MR_DEVICE` (pin a device and ignore the popup), `MR_PORT` (default
@@ -239,10 +216,9 @@ In the toolbar popup you can:
 
 ## Limitations
 
-* Some music bleed remains under speech: about −20 dB with BandIt (roughly 1/10 of the original
-  loudness), −25 dB with Demucs. BandIt usually treats singing as music and removes it;
-  Demucs keeps it.
-* BandIt Plus was trained on film-style mixes (English audiobook speech, general music,
+* Some music bleed remains under speech: about −19 dB with the default (roughly 1/9 of the
+  original loudness), −27 dB with Voc FT alone. Voc FT keeps singing as voice.
+* DnR Demucs was trained on film-style mixes (English audiobook speech, general music,
   Freesound effects). Sounds that are part of the music, and music-like effects (sirens,
   bells), can go either way.
 * DRM-protected videos (Premium movies and similar) use encrypted buffers and can't be processed.

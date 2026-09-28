@@ -270,8 +270,9 @@ def install(args, candidates, kind):
 
     if not args.no_prefetch:
         # Fetch the default model now, so the first video doesn't wait on a download.
-        print("\n4. Downloading the default model (BandIt Plus, ~150 MB)")
-        r = subprocess.run([sys.executable, "-c", "import engines; engines.get('bandit')"], cwd=HERE)
+        print("\n4. Downloading the default models (UVR Voc FT ~65 MB, DnR Demucs)")
+        r = subprocess.run([sys.executable, "-c", "import engines; engines.get(engines.DEFAULT_ENGINE)"],
+                           cwd=HERE)
         if r.returncode != 0:
             print("  Couldn't download it now; the server will try again on first use.")
 

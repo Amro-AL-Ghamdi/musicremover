@@ -11,23 +11,9 @@ torch
 torchaudio
 torchvision      # used by onnx2torch; must be the build matching torch
 numpy
-pyyaml
 imageio-ffmpeg   # bundled ffmpeg (with Opus), used when ffmpeg isn't installed
 fastapi
 uvicorn
-# Model code (fetched from GitHub on first run) needs:
-# BandIt Plus
-pytorch_lightning
-spafe
-librosa
-# Demucs
-demucs
-omegaconf
-einops
-openunmix
 # UVR Voc FT (ONNX model, converted to PyTorch so it runs on any GPU)
 onnx
 onnx2torch
-# MelBand RoFormer
-rotary_embedding_torch
-beartype
