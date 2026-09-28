@@ -132,8 +132,9 @@ class Model:
             y = self.net(b)
             return y if y.dim() == 4 else y.unsqueeze(1)  # single-target models -> [B, 1, C, T]
 
-        # 4x window overlap is the quality default; on CPU use 2x (half the work).
-        overlap = int(os.environ.get("MR_OVERLAP", 4 if self.device != "cpu" else 2))
+        # 2x window overlap: every sample is processed twice and cross-faded. 4x is
+        # marginally smoother at chunk edges but doubles the work (MR_OVERLAP=4).
+        overlap = int(os.environ.get("MR_OVERLAP", 2))
         y = overlap_add(fn, x, self.chunk, overlap=overlap)
         return {s: y[i] for i, s in enumerate(self.stems)}
 

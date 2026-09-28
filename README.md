@@ -11,7 +11,7 @@ It has two parts:
 * **`server/`**: a small local Python server that runs a source-separation model and returns
   everything except the music. By default it uses **BandIt Plus**, a *cinematic* separation
   model that splits audio into speech / music / sound effects. The server returns
-  speech + effects. It runs on your GPU if you have one (NVIDIA CUDA or Apple Metal), and
+  speech + effects. It runs on your GPU if you have one (NVIDIA CUDA, AMD ROCm or Apple Metal), and
   the popup has a **Force CPU** switch. See [`bench/`](bench/README.md) for how the available
   removers compare.
 
@@ -54,10 +54,15 @@ Requires Python 3.9+, `git`, and `ffmpeg` (with libopus) on your PATH.
 ```bash
 cd server
 python -m venv .venv && source .venv/bin/activate    # optional
-# GPU users: install the GPU build of torch + torchaudio FIRST (see "GPU setup" below)
-pip install -r requirements.txt
+python install.py      # finds your GPU and installs the matching PyTorch + everything else
 python server.py
 ```
+
+`install.py` picks the PyTorch build for your hardware: CUDA 13.0 or 12.6 for NVIDIA (based on
+your driver version), ROCm for AMD, Metal for Apple Silicon, or the small CPU-only build.
+It then installs `requirements.txt`. Use `--dry-run` to see the commands first, or
+`--target cpu|nvidia|amd|apple` to override the detection. To install by hand instead,
+follow the table below, then run `pip install -r requirements.txt`.
 
 On first use it downloads the model code (ZFTurbo's MIT-licensed
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
@@ -71,8 +76,8 @@ but installed a CPU-only PyTorch, the server log and the popup say so and tell y
 
 #### GPU setup
 
-The GPU is picked up through PyTorch, so install the matching PyTorch build before
-`requirements.txt`:
+The GPU is picked up through PyTorch. `install.py` does this for you; by hand, install the
+matching build before `requirements.txt`:
 
 | GPU | OS | Install |
 |---|---|---|
@@ -100,11 +105,12 @@ AMD notes:
 | `vocals` | voices only | BS-RoFormer. Cleanest speech, but sound effects are removed too. |
 
 Environment variables: `MR_ENGINE` (default remover), `MR_DEVICE` (pin a device and ignore the
-popup), `MR_PORT` (default `8765`), `MR_OVERLAP` (window overlap: default 4 on GPU, 2 on CPU;
-lower is faster).
+popup), `MR_PORT` (default `8765`), `MR_OVERLAP` (window overlap, default 2; 4 is marginally
+smoother but twice the work).
 
-**Speed:** these models are heavy. On a recent NVIDIA GPU a 60 s chunk takes a few seconds. On
-CPU, BandIt runs slower than real time (≈4× real time on a 4-core laptop-class CPU),
+**Speed:** these models are heavy. On a GPU, BandIt runs several times faster than real time
+(the first chunk after starting the server is slow while the model loads). On CPU it runs
+slower than real time: it took ≈5 s per second of audio on a 4-core CPU,
 so with **Pause until ready** you will wait between chunks. A GPU is strongly recommended.
 
 ### 2. Extension

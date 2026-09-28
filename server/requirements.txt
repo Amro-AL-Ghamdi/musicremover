@@ -1,5 +1,12 @@
-# Install the CUDA build of torch/torchaudio first if you have an NVIDIA GPU:
-#   https://pytorch.org/get-started/locally/
+# Easiest: run `python install.py`, which picks the right torch build and installs this file.
+# By hand: install the GPU build of torch + torchaudio BEFORE this file, otherwise
+# pip installs the CPU-only build. pip keeps an already-installed torch.
+#   NVIDIA (CUDA):       https://pytorch.org/get-started/locally/
+#   AMD Linux (ROCm):    https://pytorch.org/get-started/locally/  (choose ROCm)
+#   AMD Windows (ROCm):  RX 7000/9000, Python 3.12, AMD's wheels:
+#     https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+#   Apple Silicon:       nothing extra, the default build supports Metal
+# See "GPU setup" in the README.
 torch
 torchaudio
 numpy

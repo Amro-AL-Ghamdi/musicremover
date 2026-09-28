@@ -27,7 +27,8 @@
     readySound: true,
   };
 
-  const log = (...a) => console.debug("[musicremover]", ...a);
+  // console.log (not debug) so the lines show at Chrome's default console level.
+  const log = (...a) => console.log("[musicremover]", ...a);
 
   // ---------------------------------------------------------------------------
   // Container parsing helpers (just enough to find init/media boundaries)
@@ -161,15 +162,27 @@
       this.lastAppend = 0;
     }
 
+    // Returns a cancel function for when the append is rejected (e.g. QuotaExceededError
+    // when the buffer is full; YouTube then evicts and retries). Without cancelling,
+    // the listener would fire for the *next* append and record the wrong bytes.
     onAppend(data) {
-      if (!settings.enabled) return;
+      if (!settings.enabled) return null;
       const bytes = toBytes(data);
       const before = rangesOf(this.sb.buffered);
-      const done = () => {
+      let aborted = false;
+      const onAbort = () => { aborted = true; };
+      const cleanup = () => {
         this.sb.removeEventListener("updateend", done);
-        this.onAppended(bytes, before, rangesOf(this.sb.buffered));
+        this.sb.removeEventListener("abort", onAbort);
+      };
+      const done = () => {
+        cleanup();
+        // An aborted append may have buffered only part of the data: skip it.
+        if (!aborted) this.onAppended(bytes, before, rangesOf(this.sb.buffered));
       };
       this.sb.addEventListener("updateend", done);
+      this.sb.addEventListener("abort", onAbort);
+      return cleanup;
     }
 
     onAppended(bytes, before, after) {
@@ -188,9 +201,11 @@
       if (!span) return; // re-append of data already buffered
 
       const p = this.pending;
-      const contiguous = p && p.init === this.init && Math.abs(span[0] - p.end) < 0.1;
+      // Tolerate small overlaps/gaps between pieces (YouTube's streaming appends in
+      // small bursts whose ranges don't always line up exactly).
+      const contiguous = p && p.init === this.init && span[0] >= p.end - 0.5 && span[0] - p.end < 0.25;
       if (!contiguous) {
-        if (p) this.flush(p.parts.length);
+        if (p) this.flush(p.parts.length, "discontinuity (seek or format change)");
         this.pending = null;
         if (!clean) return; // can't decode a chunk that starts mid-cluster
         this.pending = { init: this.init, parts: [], start: span[0], end: span[0] };
@@ -205,13 +220,13 @@
       if (q.end - q.start >= target) {
         let k = q.parts.length - 1;
         while (k > 0 && !q.parts[k].clean) k--;
-        if (k > 0) this.flush(k);
-        else if (q.end - q.start > target * 2) this.flush(q.parts.length);
+        if (k > 0) this.flush(k, `reached ${target}s`);
+        else if (q.end - q.start > target * 2) this.flush(q.parts.length, "no clean cut point");
       }
     }
 
     // Emit parts[0..k) as a chunk; the rest stay pending.
-    flush(k) {
+    flush(k, reason = "") {
       const q = this.pending;
       if (!q || k === 0) return;
       const parts = q.parts.slice(0, k);
@@ -231,17 +246,23 @@
         id: `${this.session.id}-${start.toFixed(2)}`,
         start, end, state: "queued", bytes: buf, mime: this.mime, buffer: null, retryAt: 0,
       });
-      log(`chunk ${start.toFixed(1)}-${end.toFixed(1)}s (${(len / 1024) | 0} KiB) queued`);
+      log(`chunk ${start.toFixed(1)}-${end.toFixed(1)}s (${(len / 1024) | 0} KiB) queued: ${reason}`);
       pump();
     }
 
-    // Flush a short pending chunk if nothing more is arriving and playback needs it.
+    // Send a short chunk early only when playback is actually blocked on it and
+    // YouTube has stopped delivering. YouTube streams in bursts with pauses of a
+    // few seconds between them; flushing on every pause produced ~1 s chunks, and
+    // each request costs the same fixed model time, so tiny chunks fall behind.
     maybeIdleFlush(video) {
       const q = this.pending;
       if (!q || !q.parts.length) return;
-      const idle = performance.now() - this.lastAppend > 1500;
-      const needed = this.session.ended || (video && q.start < video.currentTime + 10);
-      if (idle && needed) this.flush(q.parts.length);
+      if (this.session.ended) return this.flush(q.parts.length, "end of video");
+      const idle = performance.now() - this.lastAppend;
+      const blocking = video && q.start <= video.currentTime + 2;
+      const dur = q.end - q.start;
+      if (blocking && idle > 4000 && dur >= 5) this.flush(q.parts.length, `playback waiting, ${(idle / 1000) | 0}s without new audio`);
+      else if (blocking && idle > 10000 && dur > 0.5) this.flush(q.parts.length, "YouTube stopped buffering");
     }
   }
 
@@ -291,8 +312,14 @@
     const origAppend = proto.appendBuffer;
     proto.appendBuffer = function (data) {
       const t = trackers.get(this);
-      if (t) { try { t.onAppend(data); } catch (e) { log("capture error", e); } }
-      return origAppend.apply(this, arguments);
+      let cancel = null;
+      if (t) { try { cancel = t.onAppend(data); } catch (e) { log("capture error", e); } }
+      try {
+        return origAppend.apply(this, arguments);
+      } catch (e) {
+        if (cancel) cancel();
+        throw e; // YouTube handles this itself (evicts old data and retries)
+      }
     };
     const origChangeType = proto.changeType;
     if (origChangeType) {
@@ -382,6 +409,7 @@
   let next = null;              // pre-scheduled following chunk
   let autoPaused = false;
   let resumeTimer = 0;
+  let autoPausedAt = 0;
 
   // Two-note "ready" chime, synthesized so no audio file is needed.
   // Returns how long to wait (ms) before resuming playback.
@@ -470,8 +498,10 @@
     if (ready) {
       g.gain.value = 0;
       if (autoPaused && !resumeTimer) {
-        // Chime first, then start playback once it has rung out.
-        const delay = settings.readySound ? playReadySound() : 0;
+        // Chime first, then start playback once it has rung out. Brief holds
+        // (under 2 s) resume silently so the chime doesn't become noise.
+        const heldLong = performance.now() - autoPausedAt > 2000;
+        const delay = settings.readySound && heldLong ? playReadySound() : 0;
         resumeTimer = setTimeout(() => {
           resumeTimer = 0;
           autoPaused = false;
@@ -482,6 +512,7 @@
       g.gain.value = settings.mode === "original" ? 1 : 0;
       if (settings.mode === "wait" && !video.paused && !video.ended) {
         autoPaused = true;
+        autoPausedAt = performance.now();
         video.pause();
       }
     }
