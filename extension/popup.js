@@ -44,7 +44,8 @@ function checkServer() {
       st.textContent = `Device fixed by server (MR_DEVICE=${res.forced_device})`;
     } else if (!res.gpu) {
       st.className = "status warn";
-      st.textContent = "No GPU found: running on CPU (slow)";
+      // e.g. an AMD/NVIDIA card is present but PyTorch was installed without ROCm/CUDA.
+      st.textContent = res.gpu_hint || "No GPU found: running on CPU (slow)";
     } else if (forceCpu) {
       st.className = "status warn";
       st.textContent = `GPU found (${res.gpu}), but CPU is forced`;
