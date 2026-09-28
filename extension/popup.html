@@ -22,13 +22,13 @@
   <h2>Processing</h2>
   <div id="gpu" class="status">Checking server…</div>
   <div class="row"><input type="checkbox" id="forceCpu"><label for="forceCpu">Force CPU (don't use the GPU)</label></div>
-  <label for="engine">Remover</label>
-  <select id="engine">
-    <option value="bandit">Keep speech + sound effects (BandIt Plus)</option>
-    <option value="hybrid">Keep speech + effects + singing (BandIt + RoFormer)</option>
-    <option value="vocals">Keep voices only (BS-RoFormer)</option>
+  <label for="strength">Music bleed suppression</label>
+  <select id="strength">
+    <option value="0">Off (model only)</option>
+    <option value="1">Normal</option>
+    <option value="4">Strong</option>
   </select>
-  <div class="hint" id="engineHint"></div>
+  <div class="hint" id="strengthHint"></div>
 
   <h2>Playback</h2>
   <label for="mode">When audio isn't processed yet</label>
