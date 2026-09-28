@@ -1,5 +1,15 @@
-demucs>=4.0.1
+# Install the CUDA build of torch/torchaudio first if you have an NVIDIA GPU:
+#   https://pytorch.org/get-started/locally/
 torch
+torchaudio
+numpy
+pyyaml
 fastapi
 uvicorn
-numpy
+# BandIt / BS-RoFormer model code (fetched from GitHub on first run) needs:
+pytorch_lightning
+spafe
+librosa
+einops
+rotary_embedding_torch
+beartype

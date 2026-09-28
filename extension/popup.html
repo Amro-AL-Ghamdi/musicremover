@@ -3,34 +3,50 @@
 <head>
 <meta charset="utf-8">
 <style>
-  body { font: 13px system-ui, sans-serif; width: 260px; margin: 12px; }
+  body { font: 13px system-ui, sans-serif; width: 280px; margin: 12px; }
   h1 { font-size: 15px; margin: 0 0 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #888; margin: 14px 0 4px; }
   label { display: block; margin: 8px 0 3px; color: #444; }
   select, input[type=number], input[type=text] { width: 100%; box-sizing: border-box; padding: 4px; }
-  .row { display: flex; align-items: center; gap: 8px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
   .row label { margin: 0; color: inherit; }
-  #status { margin-top: 12px; padding: 6px 8px; border-radius: 6px; background: #f1f1f1; }
-  #status.ok { background: #e3f5e5; } #status.bad { background: #fbe4e4; }
-  .hint { color: #777; font-size: 11px; margin-top: 8px; }
+  .status { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: #f1f1f1; }
+  .status.ok { background: #e3f5e5; } .status.bad { background: #fbe4e4; } .status.warn { background: #fdf3dc; }
+  .hint { color: #777; font-size: 11px; margin-top: 3px; }
 </style>
 </head>
 <body>
   <h1>🎵🚫 Music Remover</h1>
   <div class="row"><input type="checkbox" id="enabled"><label for="enabled">Enabled</label></div>
+
+  <h2>Processing</h2>
+  <div id="gpu" class="status">Checking server…</div>
+  <div class="row"><input type="checkbox" id="forceCpu"><label for="forceCpu">Force CPU (don't use the GPU)</label></div>
+  <label for="engine">Remover</label>
+  <select id="engine">
+    <option value="bandit">Keep speech + sound effects (BandIt Plus)</option>
+    <option value="hybrid">Keep speech + effects + singing (BandIt + RoFormer)</option>
+    <option value="vocals">Keep voices only (BS-RoFormer)</option>
+  </select>
+  <div class="hint" id="engineHint"></div>
+
+  <h2>Playback</h2>
   <label for="mode">When audio isn't processed yet</label>
   <select id="mode">
     <option value="wait">Pause until ready (never hear music)</option>
     <option value="mute">Keep playing, muted</option>
     <option value="original">Keep playing, original audio</option>
   </select>
+  <div class="row"><input type="checkbox" id="readySound"><label for="readySound">Play a chime when the video can start</label></div>
+
+  <h2>Advanced</h2>
   <label for="chunkSeconds">Chunk length (seconds)</label>
   <input type="number" id="chunkSeconds" min="10" max="300" step="5">
   <label for="firstChunkSeconds">First chunk length (seconds)</label>
   <input type="number" id="firstChunkSeconds" min="5" max="120" step="5">
   <label for="server">Server</label>
   <input type="text" id="server">
-  <div id="status">Checking server…</div>
-  <div class="hint">Reload the YouTube tab after enabling.</div>
+  <div class="hint">Reload the YouTube tab after changing settings.</div>
   <script src="popup.js"></script>
 </body>
 </html>

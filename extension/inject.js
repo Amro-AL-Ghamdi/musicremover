@@ -23,6 +23,8 @@
     //   "mute"     keep playing, silent
     //   "original" keep playing with the original audio
     mode: "wait",
+    // Chime when a video that was held for processing can start playing.
+    readySound: true,
   };
 
   const log = (...a) => console.debug("[musicremover]", ...a);
@@ -379,6 +381,28 @@
   let current = null;           // {chunk, node, ctxStart, mediaStart, rate}
   let next = null;              // pre-scheduled following chunk
   let autoPaused = false;
+  let resumeTimer = 0;
+
+  // Two-note "ready" chime, synthesized so no audio file is needed.
+  // Returns how long to wait (ms) before resuming playback.
+  function playReadySound() {
+    const c = ensureCtx();
+    if (c.state !== "running") return 0;
+    const t0 = c.currentTime + 0.02;
+    [[659.25, 0], [987.77, 0.12]].forEach(([freq, at]) => {
+      const osc = c.createOscillator();
+      const env = c.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      env.gain.setValueAtTime(0, t0 + at);
+      env.gain.linearRampToValueAtTime(0.18, t0 + at + 0.015);
+      env.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.45);
+      osc.connect(env).connect(c.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + 0.5);
+    });
+    return 550;
+  }
 
   function ensureCtx() {
     if (!ctx) ctx = new AudioContext({ latencyHint: "playback" });
@@ -445,7 +469,15 @@
 
     if (ready) {
       g.gain.value = 0;
-      if (autoPaused) { autoPaused = false; video.play().catch(() => {}); }
+      if (autoPaused && !resumeTimer) {
+        // Chime first, then start playback once it has rung out.
+        const delay = settings.readySound ? playReadySound() : 0;
+        resumeTimer = setTimeout(() => {
+          resumeTimer = 0;
+          autoPaused = false;
+          video.play().catch(() => {});
+        }, delay);
+      }
     } else {
       g.gain.value = settings.mode === "original" ? 1 : 0;
       if (settings.mode === "wait" && !video.paused && !video.ended) {
