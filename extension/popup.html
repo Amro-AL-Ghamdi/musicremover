@@ -24,12 +24,9 @@
   <div class="row"><input type="checkbox" id="forceCpu"><label for="forceCpu">Force CPU (don't use the GPU)</label></div>
   <label for="engine">Model</label>
   <select id="engine">
-    <option value="bandit">BandIt Plus: keeps sound effects</option>
-    <option value="demucs">Demucs: fastest, keeps voices only</option>
-    <option value="dnr_demucs">DnR Demucs: keeps sound effects (experimental)</option>
-    <option value="voc_ft">UVR Voc FT: fast, keeps voices only</option>
-    <option value="melband">MelBand RoFormer: least bleed, slowest, voices only</option>
-    <option value="voc_ft_dnr">UVR Voc FT + DnR Demucs effects (experimental)</option>
+    <option value="voc_ft_dnr">UVR Voc FT + DnR Demucs: keeps voices and sound effects</option>
+    <option value="voc_ft">UVR Voc FT: fastest, keeps voices only</option>
+    <option value="dnr_demucs">DnR Demucs: keeps sound effects</option>
   </select>
   <div class="hint" id="engineHint"></div>
   <label for="bleed">Music bleed suppression</label>

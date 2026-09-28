@@ -9,21 +9,20 @@ async function serverUrl() {
 }
 
 // Bleed-suppression strength per model and level, chosen from bench/README.md:
-// Demucs keeps improving up to much higher strengths before speech suffers.
+// Voc FT keeps improving up to much higher strengths before speech suffers.
 const STRENGTHS = {
-  bandit: { off: 0, normal: 1, strong: 4 },
-  demucs: { off: 0, normal: 16, strong: 64 },
-  dnr_demucs: { off: 0, normal: 1, strong: 4 },
-  voc_ft: { off: 0, normal: 16, strong: 64 },
-  melband: { off: 0, normal: 4, strong: 16 },
   // Effects filter strength; the voices filter runs at 4x this (engines.VocFTDnREngine).
   voc_ft_dnr: { off: 0, normal: 4, strong: 16 },
+  voc_ft: { off: 0, normal: 16, strong: 64 },
+  dnr_demucs: { off: 0, normal: 1, strong: 4 },
 };
+const DEFAULT_ENGINE = "voc_ft_dnr";
 
 // engine: model; device: "auto" (GPU if the server has one) or "cpu"; bleed: off|normal|strong.
 async function processingOptions() {
-  const o = await chrome.storage.sync.get({ engine: "bandit", device: "auto", bleed: "normal" });
-  const levels = STRENGTHS[o.engine] || STRENGTHS.bandit;
+  const o = await chrome.storage.sync.get({ engine: DEFAULT_ENGINE, device: "auto", bleed: "normal" });
+  if (!STRENGTHS[o.engine]) o.engine = DEFAULT_ENGINE;  // a model that was removed
+  const levels = STRENGTHS[o.engine];
   return { ...o, strength: levels[o.bleed] ?? levels.normal };
 }
 
@@ -73,7 +72,17 @@ async function injectIntoOpenTabs() {
     }
   }
 }
-chrome.runtime.onInstalled.addListener(injectIntoOpenTabs);
+
+// Settings saved with a model that has since been removed switch to the default.
+async function migrateEngine() {
+  const { engine } = await chrome.storage.sync.get("engine");
+  if (engine && !STRENGTHS[engine]) await chrome.storage.sync.set({ engine: DEFAULT_ENGINE });
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await migrateEngine().catch(() => {});
+  injectIntoOpenTabs();
+});
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const job = msg.type === "separate" ? separate(msg) : msg.type === "health" ? health() : null;

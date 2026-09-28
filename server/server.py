@@ -13,7 +13,7 @@ Env:  MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
       MR_FP16=0  disable half precision on GPU
       MR_OVERLAP, MR_BATCH  window overlap (2) and batch size (8 GPU / 2 CPU)
 
-Per request the extension sends ?engine=bandit|demucs|dnr_demucs, ?device=auto|cpu
+Per request the extension sends ?engine=voc_ft_dnr|voc_ft|dnr_demucs, ?device=auto|cpu
 (the popup's "Force CPU" switch) and ?strength= (bleed suppression, see
 engines.suppress_bleed).
 """
@@ -152,12 +152,12 @@ def health():
     return {"ok": True, "gpu": GPU_NAME, "gpu_device": GPU, "gpu_backend": GPU_INFO["backend"],
             "gpu_hint": GPU_INFO["hint"], "engines": sorted(engines.ENGINES),
             "loaded": {n: e.device for n, e in engines.loaded().items()},
-            "default_strength": engines.DEFAULT_STRENGTH, "last_engine": LAST["engine"],
+            "default_strength": engines.DEFAULT_STRENGTH, "default_engine": engines.DEFAULT_ENGINE, "last_engine": LAST["engine"],
             "last_device": LAST["device"], "forced_device": os.environ.get("MR_DEVICE")}
 
 
 @app.post("/separate")
-async def separate(request: Request, mime: str = "audio/webm", engine: str = "bandit",
+async def separate(request: Request, mime: str = "audio/webm", engine: str = engines.DEFAULT_ENGINE,
                    device: str = "auto", strength: float = engines.DEFAULT_STRENGTH):
     data = await request.body()
     if not data:
