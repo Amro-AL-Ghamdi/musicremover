@@ -202,13 +202,20 @@ class Engine:
         x = x.to(self.device)
         # 2x window overlap: every sample is processed twice and cross-faded.
         overlap = int(os.environ.get("MR_OVERLAP", 2))
-        batch = int(os.environ.get("MR_BATCH", 8 if self.device != "cpu" else 4))
-        y = overlap_add(self._forward, x, self.chunk, overlap=overlap, batch=batch)
+        y = overlap_add(self._forward, x, self.chunk, overlap=overlap, batch=self.batch())
         return {s: y[i] for i, s in enumerate(self.stems)}
 
     def parts(self) -> list:
         """The engines whose networks this one runs (itself, or a combination's parts)."""
         return [self]
+
+    batch_override = None  # set by the server after running out of GPU memory
+
+    def batch(self) -> int:
+        """Windows per model call."""
+        if self.batch_override:
+            return self.batch_override
+        return int(os.environ.get("MR_BATCH", 8 if self.device != "cpu" else 4))
 
     def apply(self, stems: dict, strength: float) -> torch.Tensor:
         """What to keep from the stems, with bleed suppression. Shared by the server

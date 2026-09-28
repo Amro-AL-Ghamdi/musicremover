@@ -60,12 +60,10 @@ LAST = {"engine": None, "device": None}
 
 
 def get_engine(name: str, device: str) -> "engines.Engine":
-    eng = engines.get(name)  # loaded once; combined engines share their parts
-    if eng.device != device:
-        print(f"[musicremover] {name} -> {device}", flush=True)
-        eng.to(device)
-    # Only the model in use stays on the GPU: switching models in the popup would
-    # otherwise keep every model tried so far in GPU memory.
+    eng = engines.get(name)  # loaded once (on the CPU); combined engines share their parts
+    # Only the model in use stays on the GPU. Free the others *before* moving this one
+    # there, otherwise switching models briefly needs room for both and can run out of
+    # GPU memory.
     active = set(map(id, eng.parts()))
     freed = False
     for other in engines.loaded().values():
@@ -75,7 +73,31 @@ def get_engine(name: str, device: str) -> "engines.Engine":
                 freed = True
     if freed and torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if eng.device != device:
+        print(f"[musicremover] {name} -> {device}", flush=True)
+        eng.to(device)
     return eng
+
+
+def is_oom(e: Exception) -> bool:
+    return "out of memory" in str(e).lower()
+
+
+def keep_with_oom_retry(eng: "engines.Engine", pcm, strength: float):
+    """Run the model; if the GPU runs out of memory, halve the batch and try again
+    (down to 1) instead of failing the request. The smaller batch is kept."""
+    while True:
+        try:
+            return eng.keep(pcm, strength)
+        except RuntimeError as e:
+            batch = min(p.batch() for p in eng.parts())
+            if not is_oom(e) or batch <= 1:
+                raise
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            for p in eng.parts():
+                p.batch_override = max(1, batch // 2)
+            print(f"[musicremover] GPU out of memory; retrying with batch {max(1, batch // 2)}", flush=True)
 
 
 app = FastAPI()
@@ -154,7 +176,7 @@ def _separate_sync(data: bytes, mime: str, engine: str, device: str, strength: f
     try:
         with LOCK:
             eng = get_engine(engine, device)
-            kept = eng.keep(pcm, strength)
+            kept = keep_with_oom_retry(eng, pcm, strength)
             LAST.update(engine=engine, device=device)
     except RuntimeError as e:  # e.g. model weights couldn't be downloaded
         raise HTTPException(500, str(e)) from e
