@@ -102,6 +102,15 @@ def plan(target):
     return ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cpu"], "cpu", notes
 
 
+def mark_installed():
+    """Record which requirements.txt was installed; launcher.py (run.sh / run.bat)
+    re-runs the installer when it changes, e.g. after a git pull."""
+    sys.path.insert(0, HERE)
+    import launcher
+    with open(launcher.STAMP, "w") as f:
+        f.write(launcher.requirements_hash())
+
+
 def installed_torch_kind():
     """'cuda' | 'rocm' | 'cpu' for the torch currently installed (CPU-only macOS builds
     report 'cpu'), or None if torch isn't installed."""
@@ -162,6 +171,8 @@ def main():
     for extra in lines[1:]:
         if extra:
             print("  " + extra)
+    mark_installed()
+
     if not args.no_prefetch:
         # Fetch the default model now, so the first video doesn't wait on a download.
         print("\n4. Downloading the default model (BandIt Plus, ~150 MB)")
@@ -172,8 +183,8 @@ def main():
     ext = os.path.join(os.path.dirname(HERE), "extension")
     print(f"""
 Done.
-  Start the server:   run.sh (Linux/macOS) or run.bat (Windows) in the project folder,
-                      or: python server.py
+  Start the server:   run.sh (Linux/macOS) or run.bat (Windows) in the project folder.
+                      (install.sh / install.bat start it for you right after installing.)
   Load the extension once:
     1. open chrome://extensions (or edge://extensions)
     2. turn on "Developer mode" (top right)

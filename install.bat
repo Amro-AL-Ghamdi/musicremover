@@ -45,5 +45,9 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+
+rem Start the server right away (not for --dry-run). Next time: double-click run.bat
+echo %* | find "--dry-run" >nul && (pause & exit /b 0)
 echo.
-pause
+echo Starting the server (close this window to stop it; next time just double-click run.bat)
+call "%~dp0run.bat"

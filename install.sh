@@ -40,3 +40,9 @@ fi
 "$VENV/bin/python" -m pip install --upgrade pip >/dev/null
 "$VENV/bin/python" server/install.py "$@"
 chmod +x run.sh 2>/dev/null || true
+
+# Start the server right away (not for --dry-run). Later: ./run.sh
+case " $* " in *" --dry-run "*) exit 0 ;; esac
+echo
+echo "Starting the server (Ctrl+C to stop; next time just run ./run.sh)"
+exec ./run.sh

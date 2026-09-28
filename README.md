@@ -70,16 +70,17 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 
    It finds your GPU (NVIDIA, AMD, Apple Silicon) and installs the matching PyTorch, or the
    small CPU-only build if there's no usable GPU. It also installs everything else and downloads
-   the default model. Nothing else is needed: ffmpeg comes bundled if you don't have it, and
-   git is optional.
-3. **Start the server:** double-click **`run.bat`** (Windows) or run **`./run.sh`**. Leave it running
-   while you watch.
+   the default model, then starts the server. Nothing else is needed: ffmpeg comes bundled if
+   you don't have it, and git is optional.
+3. **Next time, start the server** with **`run.bat`** (Windows) or **`./run.sh`**, and leave it
+   running while you watch.
 4. **Load the extension** once: open `chrome://extensions` (or `edge://extensions`), turn on
    **Developer mode**, click **Load unpacked** and pick the `extension/` folder.
 5. Open a YouTube video. Already-open YouTube tabs are picked up automatically.
 
-After pulling an update: re-run the install script if `requirements.txt` changed, reload the
-extension in `chrome://extensions`, and restart the server.
+After pulling an update: reload the extension in `chrome://extensions` and restart the
+server. If the update changed the Python requirements, `run.bat` / `run.sh` installs them
+automatically before starting.
 
 ## Setup (details)
 
