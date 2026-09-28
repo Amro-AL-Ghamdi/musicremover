@@ -33,8 +33,12 @@ sys.path.insert(0, HERE)
 import gpu  # noqa: E402  (no torch import at module level)
 
 PYTORCH = "https://download.pytorch.org/whl"
+# Installed together from the same index: torchvision (needed by onnx2torch) has to match
+# the torch build, or pip later swaps torch for a PyPI build to satisfy it.
+TORCH = ["torch", "torchaudio", "torchvision"]
 AMD_WINDOWS = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/"
 AMD_WINDOWS_TORCH = "2.9.1+rocm7.2.1"
+AMD_WINDOWS_VISION = "0.24.1+rocm7.2.1"
 AMD_WINDOWS_GUIDE = ("https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/"
                      "installrad/windows/install-pytorch.html")
 
@@ -109,19 +113,19 @@ def plan(target):
         if drv and drv < (580, 0):
             notes.append(f"NVIDIA driver {drv[0]}.{drv[1]}: using the CUDA 12.6 build "
                          "(driver 580+ gets CUDA 13.0).")
-            return [("CUDA 12.6", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu126"])], "cuda", notes
+            return [("CUDA 12.6", [*TORCH, "--index-url", f"{PYTORCH}/cu126"])], "cuda", notes
         if not drv:
             notes.append("Couldn't read the NVIDIA driver version; assuming a recent driver (580+).")
-        return [("CUDA 13.0", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu130"])], "cuda", notes
+        return [("CUDA 13.0", [*TORCH, "--index-url", f"{PYTORCH}/cu130"])], "cuda", notes
     if target == "amd":
         if system == "Linux":
-            generic = ("ROCm 7.2, all GPUs", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/rocm7.2"])
+            generic = ("ROCm 7.2, all GPUs", [*TORCH, "--index-url", f"{PYTORCH}/rocm7.2"])
             gfx = amd_gfx()
             family = AMD_FAMILIES.get(gfx)
             if family:
                 notes.append(f"AMD {gfx}: using AMD's {family} build (only this GPU family's ROCm "
                              f"libraries, a much smaller download); falls back to the general build.")
-                return [(f"AMD {family}", ["torch", "torchaudio", "--index-url",
+                return [(f"AMD {family}", [*TORCH, "--index-url",
                                            AMD_FAMILY_INDEX.format(family)]), generic], "rocm", notes
             if gfx:
                 notes.append(f"AMD {gfx}: no GPU-specific build known; using the general ROCm build.")
@@ -134,14 +138,15 @@ def plan(target):
             notes.append("AMD on Windows supports Radeon RX 7000/9000 and Ryzen AI 300/Max. "
                          "It needs a recent Adrenalin driver. Guide: " + AMD_WINDOWS_GUIDE)
             return [("AMD ROCm 7.2.1 (Windows)", [f"torch=={AMD_WINDOWS_TORCH}", f"torchaudio=={AMD_WINDOWS_TORCH}",
+                                                   f"torchvision=={AMD_WINDOWS_VISION}",
                                                    "--find-links", AMD_WINDOWS])], "rocm", notes
         sys.exit("AMD GPUs are supported on Linux and Windows only.")
     if target == "apple":
-        return [("default (Metal)", ["torch", "torchaudio"])], "mps", notes
+        return [("default (Metal)", TORCH)], "mps", notes
     # CPU: the dedicated index avoids pulling ~3 GB of CUDA libraries on Linux.
     if system == "Darwin":
-        return [("default", ["torch", "torchaudio"])], "cpu", notes
-    return [("CPU-only", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cpu"])], "cpu", notes
+        return [("default", TORCH)], "cpu", notes
+    return [("CPU-only", [*TORCH, "--index-url", f"{PYTORCH}/cpu"])], "cpu", notes
 
 
 def mark_installed():
@@ -161,6 +166,21 @@ def installed_torch_kind():
             "'cuda' if torch.version.cuda else 'cpu')")
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+def torch_constraints(dry):
+    """pip args pinning the installed torch/torchaudio/torchvision versions."""
+    if dry:
+        return []
+    code = ("import importlib.metadata as m\n"
+            "for p in ('torch', 'torchaudio', 'torchvision'):\n"
+            "    try: print(f'{p}=={m.version(p)}')\n"
+            "    except m.PackageNotFoundError: pass")
+    pins = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout
+    path = os.path.join(TMP, "torch-constraints.txt")
+    with open(path, "w") as f:
+        f.write(pins)
+    return ["-c", path]
 
 
 def pip(*args, dry):
@@ -216,8 +236,8 @@ def install(args, candidates, kind):
     print(f"\n1. PyTorch ({kind})" + (f": replacing the installed {current} build" if wrong_kind else ""))
     if wrong_kind:
         # Same package name across builds, so pip would otherwise keep the wrong one.
-        pip("uninstall", "-y", "torch", "torchaudio", dry=args.dry_run)
-    if candidates[0][1][:2] == ["torch", "torchaudio"] and "--index-url" in candidates[0][1] and len(candidates) > 1:
+        pip("uninstall", "-y", *TORCH, dry=args.dry_run)
+    if "--index-url" in candidates[0][1] and len(candidates) > 1:
         pip("install", *TORCH_DEPS, dry=args.dry_run)  # small, from PyPI (see TORCH_DEPS)
     for i, (label, torch_args) in enumerate(candidates):
         try:
@@ -230,7 +250,10 @@ def install(args, candidates, kind):
             print(f"  The {label} build didn't install; trying {candidates[i + 1][0]} instead.")
 
     print("\n2. Other dependencies")
-    pip("install", "-r", os.path.join(HERE, "requirements.txt"), dry=args.dry_run)
+    # Pin the PyTorch build just installed, so no other package can make pip replace it
+    # with a different (e.g. CUDA) build from PyPI.
+    pip("install", "-r", os.path.join(HERE, "requirements.txt"), *torch_constraints(args.dry_run),
+        dry=args.dry_run)
 
     if args.dry_run:
         return
