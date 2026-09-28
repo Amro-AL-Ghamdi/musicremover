@@ -216,7 +216,8 @@ def main():
     for key in want:
         label, fn = candidates[key]
         if fn is None:
-            fn = audio_separator_vocals(sep_models[key])
+            run = audio_separator_vocals(sep_models[key])
+            fn = lambda m, run=run: run(m["mix"])
         rows, secs = [], 0.0
         for m in mixes:
             t = time.time()
