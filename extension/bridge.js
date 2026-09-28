@@ -2,7 +2,9 @@
 // background service worker, and pushes settings changes into the page.
 (() => {
   const TAG = "__musicremover__";
-  const DEFAULTS = { enabled: true, mode: "wait", chunkSeconds: 60, firstChunkSeconds: 20, readySound: true };
+  // engine + bleed are passed along so the page can re-process chunks when they change.
+  const DEFAULTS = { enabled: true, mode: "wait", chunkSeconds: 60, firstChunkSeconds: 20, readySound: true,
+                     engine: "bandit", bleed: "normal" };
 
   const pushSettings = () =>
     chrome.storage.sync.get(DEFAULTS, (settings) => window.postMessage({ [TAG]: "settings", settings }, "*"));

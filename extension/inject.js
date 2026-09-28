@@ -455,10 +455,21 @@
       }
     }
 
-    // Free unsent units that playback has left well behind (e.g. skipped by a seek).
-    // If YouTube appends them again, addUnit takes the new copy.
+    // Free unsent units that playback has left well behind (e.g. skipped by a seek), but
+    // only once YouTube has dropped them from its own buffer too. While YouTube still has
+    // them buffered it won't append them again, so dropping ours would leave that stretch
+    // impossible to process when the user seeks back into it. Once YouTube evicts them,
+    // seeking back makes it re-append, and addUnit takes the new copy.
     dropBehind(t) {
-      for (const x of this.units) if (!x.sent && x.bytes && x.end < t) x.bytes = null;
+      let ranges = [];
+      try {
+        const b = this.sb.buffered;
+        for (let i = 0; i < b.length; i++) ranges.push([b.start(i), b.end(i)]);
+      } catch (_) {
+        return; // SourceBuffer gone; the whole session is cleaned up separately
+      }
+      const buffered = (x) => ranges.some(([s, e]) => s < x.end && x.t < e);
+      for (const x of this.units) if (!x.sent && x.bytes && x.end < t && !buffered(x)) x.bytes = null;
     }
 
     // Unsent audio that covers time t (captured but not sent yet)?
@@ -549,12 +560,38 @@
     return v ? sessions.get(v.currentSrc || v.src) : null;
   }
 
+  // Which model settings processed audio came from. When they change (model or bleed
+  // level in the popup), chunks already processed are redone with the new settings.
+  const profile = () => `${settings.engine}|${settings.bleed}`;
+  let activeProfile = null;
+
+  function onProfileChange() {
+    const p = profile();
+    if (activeProfile === null) { activeProfile = p; return; }
+    if (p === activeProfile) return;
+    log(`model settings changed (${activeProfile} -> ${p}); re-processing`);
+    activeProfile = p;
+    serverError = null;
+    for (const s of allSessions()) {
+      for (const c of s.chunks) {
+        c.retries = 0;
+        c.retryAt = 0;
+        // Finished chunks keep playing their old audio until the new version is ready.
+        if (c.state === "done") c.redo = true;
+        else if (c.state === "error") c.state = "queued";
+        // "sending" chunks are re-queued when their (old-settings) result arrives.
+      }
+    }
+    pump();
+  }
+
   // Send one chunk at a time, the one playback needs soonest first.
   function pump() {
     // Watchdog: a request that never answered (e.g. the message was lost) is retried.
     if (inFlight && performance.now() - inFlight.sentAt > 20 * 60 * 1000) {
       log(`no answer for chunk ${inFlight.start.toFixed(1)}s after 20 min; retrying`);
-      inFlight.state = "queued";
+      if (inFlight.state === "sending") inFlight.state = "queued";
+      inFlight.inFlight = false;
       inFlight = null;
     }
     if (inFlight || !settings.enabled) return;
@@ -562,15 +599,21 @@
     if (!s) return;
     const t = mainVideo().currentTime;
     const now = performance.now();
-    const queued = s.chunks.filter((c) => c.state === "queued" && c.retryAt <= now);
-    if (!queued.length) return;
-    const score = (c) => (c.end <= t ? 1e6 + c.start : Math.max(0, c.start - t));
-    queued.sort((a, b) => score(a) - score(b));
-    const c = queued[0];
-    c.state = "sending";
+    // (inFlight also covers the time a result is being decoded, so a redo chunk, which
+    // stays "done" meanwhile, isn't sent twice.)
+    const todo = s.chunks.filter((c) => c.bytes && !c.inFlight && c.retryAt <= now &&
+      (c.state === "queued" || (c.state === "done" && c.redo)));
+    if (!todo.length) return;
+    // Nearest to the playhead first; unprocessed before re-processing at equal distance.
+    const score = (c) => (c.end <= t ? 1e6 + c.start : Math.max(0, c.start - t)) + (c.redo ? 0.5 : 0);
+    todo.sort((a, b) => score(a) - score(b));
+    const c = todo[0];
+    if (c.state === "queued") c.state = "sending"; // a redo stays "done" (still playable)
+    c.inFlight = true;
+    c.sentProfile = profile();
     inFlight = c;
     c.sentAt = now;
-    // Bytes are copied (not transferred) so the chunk can be retried on failure.
+    // Bytes are copied (not transferred): kept for retries and for re-processing.
     window.postMessage({ [TAG]: "separate", id: c.id, mime: c.mime, bytes: c.bytes }, "*");
   }
 
@@ -581,6 +624,7 @@
       const wasEnabled = settings.enabled;
       Object.assign(settings, m.settings);
       if (wasEnabled && !settings.enabled) stopProcessed();
+      onProfileChange();
       return;
     }
     if (m[TAG] !== "result") return;
@@ -588,11 +632,23 @@
     for (const s of allSessions()) chunk = chunk || s.chunks.find((c) => c.id === m.id);
     if (inFlight && inFlight.id === m.id) inFlight = null;
     if (!chunk) return pump();
+    const isRedo = chunk.state === "done";
+    // The settings changed while this was being processed, so the result is outdated.
+    // A chunk being redone keeps its current audio; a chunk with no audio yet uses this
+    // result for now (so playback doesn't stall) and is redone with the new settings.
+    const outdated = chunk.sentProfile !== profile();
+    if (outdated && (isRedo || m.error)) {
+      chunk.inFlight = false;
+      if (isRedo) chunk.redo = true;
+      else chunk.state = "queued";
+      return pump();
+    }
     // Retry with backoff (3 s, 6 s, 12 s, ... up to 60 s), so a server that keeps failing
-    // (e.g. a model download that fails) isn't hammered every 3 s.
+    // (e.g. a model download that fails) isn't hammered every 3 s. A chunk being redone
+    // keeps playing its previous audio meanwhile.
     const retryLater = (why) => {
       chunk.retries = (chunk.retries || 0) + 1;
-      chunk.state = "queued";
+      if (!isRedo) chunk.state = "queued";
       chunk.retryAt = performance.now() + Math.min(60000, 3000 * 2 ** (chunk.retries - 1));
       serverError = why;
       log("server error", why);
@@ -603,19 +659,26 @@
       try {
         // Keep the compressed audio (~1 MB/min) and decode on demand: decoded audio is
         // ~1.4 GB per hour, so only chunks near the playhead stay decoded.
+        const buffer = await ensureCtx().decodeAudioData(m.audio.slice(0));
         chunk.encoded = m.audio;
-        chunk.buffer = await ensureCtx().decodeAudioData(m.audio.slice(0));
+        chunk.buffer = buffer;
         chunk.state = "done";
-        chunk.bytes = null;
+        chunk.redo = outdated;
+        chunk.retries = 0;
         serverError = null;
         procSeconds = 0.7 * procSeconds + 0.3 * (performance.now() - chunk.sentAt) / 1000;
-        log(`chunk ${chunk.start.toFixed(1)}s ready in ${((performance.now() - chunk.sentAt) / 1000).toFixed(1)}s`);
+        log(`chunk ${chunk.start.toFixed(1)}s ${isRedo ? "re-processed" : "ready"} in ` +
+            `${((performance.now() - chunk.sentAt) / 1000).toFixed(1)}s`);
+        // If it's playing (or scheduled) right now, switch to the new audio.
+        if (current && current.chunk === chunk) { stopNode(current); current = null; }
+        if (next && next.chunk === chunk) { stopNode(next); next = null; }
       } catch (e) {
-        chunk.encoded = null;
         if ((chunk.retries || 0) < 3) retryLater("could not decode processed audio");
-        else { chunk.state = "error"; serverError = "could not decode processed audio"; }
+        else if (!isRedo) { chunk.state = "error"; serverError = "could not decode processed audio"; }
+        else chunk.redo = false; // keep the previous audio
       }
     }
+    chunk.inFlight = false;
     pump();
     tick();
   });
@@ -996,7 +1059,12 @@
   // ---------------------------------------------------------------------------
 
   const timer = setInterval(tick, 100);
-  document.addEventListener("seeked", tick, true);
+  document.addEventListener("seeked", () => {
+    // A user seek ends any "play muted" stretch from the stall safety net: the new
+    // position gets processed (and waited for) normally.
+    mutedUntil = -1;
+    tick();
+  }, true);
   document.addEventListener("play", tick, true);
   document.addEventListener("pause", () => { if (!disposed) stopProcessed(); }, true);
   document.addEventListener("ratechange", tick, true);
