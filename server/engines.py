@@ -26,10 +26,13 @@ Shared on top of every model:
 """
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import urllib.request
+import zipfile
 
 import numpy as np
 import torch
@@ -58,15 +61,49 @@ def _fetch(url: str, name: str = None) -> str:
     return path
 
 
+def ffmpeg_exe() -> str:
+    """ffmpeg from PATH, else the copy bundled with the imageio-ffmpeg package, so users
+    don't have to install ffmpeg themselves (it includes the libopus encoder we need)."""
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:
+        raise RuntimeError("ffmpeg not found: install it, or `pip install imageio-ffmpeg`") from e
+
+
+def _fetch_msst_zip(path: str):
+    """Download the pinned MSST commit as a zip (no git needed)."""
+    url = f"{MSST_REPO[:-4]}/archive/{MSST_COMMIT}.zip"
+    print(f"[musicremover] downloading {url}", flush=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = os.path.join(tmp, "msst.zip")
+        urllib.request.urlretrieve(url, archive)
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(tmp)
+        top = next(d for d in os.listdir(tmp) if d.startswith("Music-Source-Separation-Training"))
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        shutil.move(os.path.join(tmp, top), path)
+
+
 def _msst() -> str:
     path = os.path.join(CACHE, "msst")
     if not os.path.isdir(os.path.join(path, "models")):
         print("[musicremover] fetching model code (MSST)", flush=True)
-        os.makedirs(path, exist_ok=True)
-        run = lambda *a: subprocess.run(["git", "-C", path, *a], check=True, capture_output=True)
-        run("init", "-q")
-        run("fetch", "-q", "--depth", "1", MSST_REPO, MSST_COMMIT)
-        run("checkout", "-q", "FETCH_HEAD")
+        os.makedirs(CACHE, exist_ok=True)
+        try:
+            if not shutil.which("git"):
+                raise OSError("git not installed")
+            os.makedirs(path, exist_ok=True)
+            run = lambda *a: subprocess.run(["git", "-C", path, *a], check=True, capture_output=True)
+            run("init", "-q")
+            run("fetch", "-q", "--depth", "1", MSST_REPO, MSST_COMMIT)
+            run("checkout", "-q", "FETCH_HEAD")
+        except (OSError, subprocess.CalledProcessError):
+            _fetch_msst_zip(path)
     if path not in sys.path:
         sys.path.insert(0, path)
     # Register the packages without running their __init__, which imports

@@ -11,6 +11,7 @@ torch
 torchaudio
 numpy
 pyyaml
+imageio-ffmpeg   # bundled ffmpeg (with Opus), used when ffmpeg isn't installed
 fastapi
 uvicorn
 # Model code (fetched from GitHub on first run) needs:

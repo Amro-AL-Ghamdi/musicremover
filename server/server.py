@@ -100,7 +100,7 @@ def decode(data: bytes, mime: str) -> np.ndarray:
         path = f.name
     try:
         proc = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
+            [engines.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", path,
              "-vn", "-f", "f32le", "-ac", str(CHANNELS), "-ar", str(SR), "pipe:1"],
             capture_output=True,
         )
@@ -115,7 +115,7 @@ def decode(data: bytes, mime: str) -> np.ndarray:
 def encode_opus(pcm: np.ndarray) -> bytes:
     interleaved = np.ascontiguousarray(pcm.T, dtype=np.float32).tobytes()
     proc = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error",
+        [engines.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
          "-f", "f32le", "-ar", str(SR), "-ac", str(CHANNELS), "-i", "pipe:0",
          "-c:a", "libopus", "-b:a", "128k", "-f", "ogg", "pipe:1"],
         input=interleaved, capture_output=True,

@@ -64,7 +64,7 @@ def fetch(url, name):
 
 
 def load(path):
-    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "f32le", "-ac", "2",
+    raw = subprocess.run([engines.ffmpeg_exe(), "-loglevel", "error", "-i", path, "-f", "f32le", "-ac", "2",
                           "-ar", str(SR), "pipe:1"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.float32).reshape(-1, 2).T.copy()
 

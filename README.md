@@ -59,11 +59,33 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
   installed or reloaded are picked up automatically: the playing video restarts at the same
   position so its audio can be captured.
 
-## Setup
+## Quick start
+
+1. **Download** this repository: `git clone https://github.com/siba1426/musicremover.git`, or on
+   GitHub click **Code → Download ZIP** and unzip it.
+2. **Install** (needs [Python](https://www.python.org/downloads/) 3.9+; on Windows tick
+   "Add python.exe to PATH", and pick 3.12 if you have an AMD GPU):
+   * Windows: double-click **`install.bat`**
+   * Linux / macOS: run **`./install.sh`**
+
+   It finds your GPU (NVIDIA, AMD, Apple Silicon) and installs the matching PyTorch, or the
+   small CPU-only build if there's no usable GPU. It also installs everything else and downloads
+   the default model. Nothing else is needed: ffmpeg comes bundled if you don't have it, and
+   git is optional.
+3. **Start the server:** double-click **`run.bat`** (Windows) or run **`./run.sh`**. Leave it running
+   while you watch.
+4. **Load the extension** once: open `chrome://extensions` (or `edge://extensions`), turn on
+   **Developer mode**, click **Load unpacked** and pick the `extension/` folder.
+5. Open a YouTube video. Already-open YouTube tabs are picked up automatically.
+
+After pulling an update: re-run the install script if `requirements.txt` changed, reload the
+extension in `chrome://extensions`, and restart the server.
+
+## Setup (details)
 
 ### 1. Server
 
-Requires Python 3.9+, `git`, and `ffmpeg` (with libopus) on your PATH.
+The install scripts above wrap these steps. By hand (Python 3.9+):
 
 ```bash
 cd server
@@ -71,6 +93,9 @@ python -m venv .venv && source .venv/bin/activate    # optional
 python install.py      # finds your GPU and installs the matching PyTorch + everything else
 python server.py
 ```
+
+ffmpeg is taken from your PATH if installed, otherwise from the bundled `imageio-ffmpeg`
+package. The model code is fetched with git if available, otherwise as a zip from GitHub.
 
 `install.py` picks the PyTorch build for your hardware: CUDA 13.0 or 12.6 for NVIDIA (based on
 your driver version), ROCm for AMD, Metal for Apple Silicon, or the small CPU-only build.

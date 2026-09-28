@@ -3,6 +3,10 @@
     python install.py            detect the GPU and install everything
     python install.py --dry-run  only show what would be installed
     python install.py --target cpu|nvidia|amd|apple   skip detection
+    python install.py --no-prefetch  don't download the default model now
+
+Usually run through install.sh / install.bat in the repository root, which
+create a virtual environment first.
 
 PyTorch ships separate builds per GPU vendor under the same package name, so
 a plain `pip install torch` gives you the wrong one on many machines (e.g. a
@@ -13,7 +17,7 @@ This picks the build, installs it, then installs requirements.txt.
   AMD, Linux      ROCm 7.2 build
   AMD, Windows    AMD's ROCm 7.2.1 wheels (RX 7000/9000, Ryzen AI; needs Python 3.12)
   Apple Silicon   the default build (Metal is included)
-  otherwise       the CPU-only build (small download)
+  no GPU          the CPU-only build (small download); the server then runs on the CPU
 """
 
 import argparse
@@ -119,7 +123,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--target", choices=["auto", "nvidia", "amd", "apple", "cpu"], default="auto")
     ap.add_argument("--dry-run", action="store_true", help="print the commands without running them")
+    ap.add_argument("--no-prefetch", action="store_true", help="don't download the default model now")
     args = ap.parse_args()
+
+    if sys.version_info < (3, 9):
+        sys.exit(f"Python 3.9 or newer is needed (this is {platform.python_version()}).")
 
     if args.target == "auto":
         target, why = detect_target()
@@ -154,7 +162,22 @@ def main():
     for extra in lines[1:]:
         if extra:
             print("  " + extra)
-    print("\nDone. Start the server with:  python server.py")
+    if not args.no_prefetch:
+        # Fetch the default model now, so the first video doesn't wait on a download.
+        print("\n4. Downloading the default model (BandIt Plus, ~150 MB)")
+        r = subprocess.run([sys.executable, "-c", "import engines; engines.get('bandit')"], cwd=HERE)
+        if r.returncode != 0:
+            print("  Couldn't download it now; the server will try again on first use.")
+
+    ext = os.path.join(os.path.dirname(HERE), "extension")
+    print(f"""
+Done.
+  Start the server:   run.sh (Linux/macOS) or run.bat (Windows) in the project folder,
+                      or: python server.py
+  Load the extension once:
+    1. open chrome://extensions (or edge://extensions)
+    2. turn on "Developer mode" (top right)
+    3. "Load unpacked" -> choose {ext}""")
 
 
 if __name__ == "__main__":
