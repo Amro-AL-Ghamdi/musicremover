@@ -54,7 +54,7 @@ Requires Python 3.9+, `git`, and `ffmpeg` (with libopus) on your PATH.
 ```bash
 cd server
 python -m venv .venv && source .venv/bin/activate    # optional
-# NVIDIA GPU: install the CUDA build of torch + torchaudio first (https://pytorch.org/get-started/locally/)
+# GPU users: install the GPU build of torch + torchaudio FIRST (see "GPU setup" below)
 pip install -r requirements.txt
 python server.py
 ```
@@ -64,9 +64,32 @@ On first use it downloads the model code (ZFTurbo's MIT-licensed
 pinned to a specific commit) and the weights from GitHub releases into `server/.cache/`:
 BandIt Plus is 149 MB, and BS-RoFormer (only needed for the other two removers) is 640 MB.
 
-**GPU / CPU:** the server uses an NVIDIA (CUDA) or Apple Silicon (MPS) GPU automatically when
+**GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
-CPU instead; the model moves over on the next chunk, with no restart needed.
+CPU instead; the model moves over on the next chunk, with no restart needed. If you have a GPU
+but installed a CPU-only PyTorch, the server log and the popup say so and tell you what to install.
+
+#### GPU setup
+
+The GPU is picked up through PyTorch, so install the matching PyTorch build before
+`requirements.txt`:
+
+| GPU | OS | Install |
+|---|---|---|
+| NVIDIA | Windows / Linux | CUDA build from [pytorch.org](https://pytorch.org/get-started/locally/) |
+| AMD Radeon | Linux | ROCm build from [pytorch.org](https://pytorch.org/get-started/locally/) (choose *ROCm*), or AMD's wheels ([guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-pytorch.html)) |
+| AMD Radeon RX 7000 / 9000, Ryzen AI 300 / Max | Windows | AMD's ROCm PyTorch for Windows (public preview; needs Python 3.12 and a recent Adrenalin driver): [guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html). WSL2 also works: [guide](https://rocm.docs.amd.com/projects/radeon/en/latest/docs/install/wsl/install-pytorch.html) |
+| Apple Silicon | macOS | the regular `pip install torch torchaudio` (Metal is built in) |
+
+AMD notes:
+* ROCm shows up in PyTorch as the `cuda` device, so nothing else needs configuring. The popup
+  shows e.g. `Radeon RX 7900 XTX (AMD ROCm)`.
+* The server sets `MIOPEN_FIND_MODE=FAST` so the first chunk doesn't stall for minutes
+  while ROCm benchmarks kernels.
+* Linux, older or unlisted Radeon cards (e.g. RX 6000 series): if ROCm doesn't recognize the
+  card, start the server with `HSA_OVERRIDE_GFX_VERSION=10.3.0` (RDNA2) or `11.0.0` (RDNA3).
+* Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
+  CPU, or run the server under Linux or WSL2.
 
 **Removers** (chosen in the popup):
 

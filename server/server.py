@@ -8,7 +8,8 @@ chunk with ffmpeg, removes the music (see engines.py) and returns the rest
 
 Run:  python server.py            (listens on http://127.0.0.1:8765)
 Env:  MR_ENGINE  default engine: bandit | hybrid | vocals (default: bandit)
-      MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available)
+      MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
+                 AMD GPUs (ROCm build of PyTorch) are "cuda" too.
       MR_PORT    port (default: 8765)
 
 The extension can override engine and device per request (?engine=&device=),
@@ -29,6 +30,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 import engines
+import gpu
 
 SR = engines.SR
 CHANNELS = 2
@@ -36,16 +38,8 @@ PORT = int(os.environ.get("MR_PORT", "8765"))
 DEFAULT_ENGINE = os.environ.get("MR_ENGINE", "bandit")
 
 
-def detect_gpu():
-    """Returns (device, human readable name) of the best GPU, or (None, None)."""
-    if torch.cuda.is_available():
-        return "cuda", torch.cuda.get_device_name(0)
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return "mps", "Apple GPU (Metal)"
-    return None, None
-
-
-GPU, GPU_NAME = detect_gpu()
+GPU_INFO = gpu.detect()
+GPU, GPU_NAME = GPU_INFO["device"], GPU_INFO["name"]
 
 
 def resolve_device(requested: str) -> str:
@@ -56,7 +50,9 @@ def resolve_device(requested: str) -> str:
     return GPU
 
 
-print(f"[musicremover] GPU: {GPU_NAME or 'none found, using CPU'}", flush=True)
+print(f"[musicremover] GPU: {GPU_NAME or 'none usable, using CPU'}", flush=True)
+if GPU_INFO["hint"]:
+    print(f"[musicremover] {GPU_INFO['hint']}", flush=True)
 
 # One separation at a time: models (and the GPU) are shared.
 LOCK = threading.Lock()
@@ -116,7 +112,8 @@ def encode_opus(pcm: np.ndarray) -> bytes:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "gpu": GPU_NAME, "gpu_device": GPU, "engines": list(engines.Engine.NAMES),
+    return {"ok": True, "gpu": GPU_NAME, "gpu_device": GPU, "gpu_backend": GPU_INFO["backend"],
+            "gpu_hint": GPU_INFO["hint"], "engines": list(engines.Engine.NAMES),
             "default_engine": DEFAULT_ENGINE, "last_engine": LAST["engine"], "last_device": LAST["device"],
             "forced_device": os.environ.get("MR_DEVICE")}
 
