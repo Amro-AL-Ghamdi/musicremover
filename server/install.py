@@ -14,7 +14,7 @@ CPU-only build on Windows, or a 3 GB CUDA build on a machine without NVIDIA).
 This picks the build, installs it, then installs requirements.txt.
 
   NVIDIA          CUDA 13.0 build (driver >= 580), or CUDA 12.6 (driver >= 525)
-  AMD, Linux      ROCm 7.2 build
+  AMD, Linux      AMD's build for your GPU family (e.g. gfx120X-all for RX 9000), else ROCm 7.2
   AMD, Windows    AMD's ROCm 7.2.1 wheels (RX 7000/9000, Ryzen AI; needs Python 3.12)
   Apple Silicon   the default build (Metal is included)
   no GPU          the CPU-only build (small download); the server then runs on the CPU
@@ -64,8 +64,40 @@ def detect_target():
     return "cpu", "no NVIDIA/AMD GPU found"
 
 
+# AMD's per-GPU-family PyTorch builds (ROCm "TheRock"): they only contain the ROCm
+# libraries for one family, so they're much smaller than the build for every GPU.
+AMD_FAMILY_INDEX = "https://repo.amd.com/rocm/whl/{}/"
+AMD_FAMILIES = {
+    "gfx1200": "gfx120X-all", "gfx1201": "gfx120X-all",                   # RX 9000 (RDNA4)
+    "gfx1100": "gfx110X-all", "gfx1101": "gfx110X-all", "gfx1102": "gfx110X-all",
+    "gfx1103": "gfx110X-all",                                              # RX 7000 (RDNA3)
+    "gfx1150": "gfx1150", "gfx1151": "gfx1151",                            # Ryzen AI 300 / Max
+}
+# PyTorch's own dependencies, installed from PyPI first so the AMD index only has to
+# provide torch/torchaudio and the ROCm libraries.
+TORCH_DEPS = ["setuptools", "filelock", "typing-extensions", "sympy", "networkx", "jinja2", "fsspec", "numpy"]
+
+
+def amd_gfx():
+    """The AMD GPU's gfx target (e.g. 'gfx1200') from the kernel driver, without ROCm."""
+    import glob
+    for path in sorted(glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")):
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("gfx_target_version"):
+                        v = int(line.split()[1])
+                        if v:  # 0 = CPU node
+                            major, minor, step = v // 10000, (v // 100) % 100, v % 100
+                            return f"gfx{major}{minor}{step:x}"
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def plan(target):
-    """Returns (pip args for torch+torchaudio, expected build kind, notes). Exits on dead ends."""
+    """Returns (candidates, expected build kind, notes). candidates is a list of
+    (label, pip args for torch+torchaudio), tried in order until one installs."""
     system = platform.system()
     notes = []
     if target == "nvidia":
@@ -77,13 +109,23 @@ def plan(target):
         if drv and drv < (580, 0):
             notes.append(f"NVIDIA driver {drv[0]}.{drv[1]}: using the CUDA 12.6 build "
                          "(driver 580+ gets CUDA 13.0).")
-            return ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu126"], "cuda", notes
+            return [("CUDA 12.6", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu126"])], "cuda", notes
         if not drv:
             notes.append("Couldn't read the NVIDIA driver version; assuming a recent driver (580+).")
-        return ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu130"], "cuda", notes
+        return [("CUDA 13.0", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cu130"])], "cuda", notes
     if target == "amd":
         if system == "Linux":
-            return ["torch", "torchaudio", "--index-url", f"{PYTORCH}/rocm7.2"], "rocm", notes
+            generic = ("ROCm 7.2, all GPUs", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/rocm7.2"])
+            gfx = amd_gfx()
+            family = AMD_FAMILIES.get(gfx)
+            if family:
+                notes.append(f"AMD {gfx}: using AMD's {family} build (only this GPU family's ROCm "
+                             f"libraries, a much smaller download); falls back to the general build.")
+                return [(f"AMD {family}", ["torch", "torchaudio", "--index-url",
+                                           AMD_FAMILY_INDEX.format(family)]), generic], "rocm", notes
+            if gfx:
+                notes.append(f"AMD {gfx}: no GPU-specific build known; using the general ROCm build.")
+            return [generic], "rocm", notes
         if system == "Windows":
             if sys.version_info[:2] != (3, 12):
                 sys.exit(f"AMD's ROCm PyTorch for Windows needs Python 3.12 (this is "
@@ -91,15 +133,15 @@ def plan(target):
                          f"or use --target cpu.")
             notes.append("AMD on Windows supports Radeon RX 7000/9000 and Ryzen AI 300/Max. "
                          "It needs a recent Adrenalin driver. Guide: " + AMD_WINDOWS_GUIDE)
-            return [f"torch=={AMD_WINDOWS_TORCH}", f"torchaudio=={AMD_WINDOWS_TORCH}",
-                    "--find-links", AMD_WINDOWS], "rocm", notes
+            return [("AMD ROCm 7.2.1 (Windows)", [f"torch=={AMD_WINDOWS_TORCH}", f"torchaudio=={AMD_WINDOWS_TORCH}",
+                                                   "--find-links", AMD_WINDOWS])], "rocm", notes
         sys.exit("AMD GPUs are supported on Linux and Windows only.")
     if target == "apple":
-        return ["torch", "torchaudio"], "mps", notes
+        return [("default (Metal)", ["torch", "torchaudio"])], "mps", notes
     # CPU: the dedicated index avoids pulling ~3 GB of CUDA libraries on Linux.
     if system == "Darwin":
-        return ["torch", "torchaudio"], "cpu", notes
-    return ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cpu"], "cpu", notes
+        return [("default", ["torch", "torchaudio"])], "cpu", notes
+    return [("CPU-only", ["torch", "torchaudio", "--index-url", f"{PYTORCH}/cpu"])], "cpu", notes
 
 
 def mark_installed():
@@ -128,6 +170,17 @@ def pip(*args, dry):
         subprocess.run(cmd, check=True)
 
 
+# pip unpacks the multi-GB PyTorch wheels in the temp folder. On many Linux systems /tmp
+# is in RAM (tmpfs), which can run out and crash the install, so use a folder on disk.
+TMP = os.path.join(HERE, ".cache", "tmp")
+
+
+def use_disk_temp():
+    os.makedirs(TMP, exist_ok=True)
+    for var in ("TMPDIR", "TEMP", "TMP"):
+        os.environ[var] = TMP  # inherited by pip and every other child process
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--target", choices=["auto", "nvidia", "amd", "apple", "cpu"], default="auto")
@@ -144,9 +197,18 @@ def main():
     else:
         target = args.target
         print(f"Using --target {target}")
-    torch_args, kind, notes = plan(target)
+    candidates, kind, notes = plan(target)
     for n in notes:
         print("Note: " + n)
+    if not args.dry_run:
+        use_disk_temp()
+    try:
+        install(args, candidates, kind)
+    finally:
+        shutil.rmtree(TMP, ignore_errors=True)
+
+
+def install(args, candidates, kind):
 
     current = installed_torch_kind()
     # Apple builds report "cpu" too; the default macOS wheel is the right one either way.
@@ -155,7 +217,17 @@ def main():
     if wrong_kind:
         # Same package name across builds, so pip would otherwise keep the wrong one.
         pip("uninstall", "-y", "torch", "torchaudio", dry=args.dry_run)
-    pip("install", *torch_args, dry=args.dry_run)
+    if candidates[0][1][:2] == ["torch", "torchaudio"] and "--index-url" in candidates[0][1] and len(candidates) > 1:
+        pip("install", *TORCH_DEPS, dry=args.dry_run)  # small, from PyPI (see TORCH_DEPS)
+    for i, (label, torch_args) in enumerate(candidates):
+        try:
+            print(f"  {label}:")
+            pip("install", *torch_args, dry=args.dry_run)
+            break
+        except subprocess.CalledProcessError:
+            if i == len(candidates) - 1:
+                raise
+            print(f"  The {label} build didn't install; trying {candidates[i + 1][0]} instead.")
 
     print("\n2. Other dependencies")
     pip("install", "-r", os.path.join(HERE, "requirements.txt"), dry=args.dry_run)

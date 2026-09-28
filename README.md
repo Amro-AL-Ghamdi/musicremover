@@ -100,7 +100,13 @@ package. The model code is fetched with git if available, otherwise as a zip fro
 
 `install.py` picks the PyTorch build for your hardware: CUDA 13.0 or 12.6 for NVIDIA (based on
 your driver version), ROCm for AMD, Metal for Apple Silicon, or the small CPU-only build.
-It then installs `requirements.txt`. Use `--dry-run` to see the commands first, or
+On Linux with an AMD card it reads the GPU's gfx target (e.g. `gfx1200` for an RX 9060 XT) and
+first tries AMD's build for just that GPU family (`gfx120X-all` for RX 9000, `gfx110X-all` for
+RX 7000, `gfx1150`/`gfx1151` for Ryzen AI), which leaves out the ROCm libraries for every other
+GPU; if that fails it falls back to the general ROCm build from pytorch.org.
+It then installs `requirements.txt`. While installing, temporary files go to
+`server/.cache/tmp` on disk instead of the system temp folder (`/tmp` is often in RAM and too
+small for the PyTorch wheels); the folder is deleted afterwards. Use `--dry-run` to see the commands first, or
 `--target cpu|nvidia|amd|apple` to override the detection. To install by hand instead,
 follow the table below, then run `pip install -r requirements.txt`.
 
