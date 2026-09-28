@@ -13,7 +13,13 @@ numpy
 pyyaml
 fastapi
 uvicorn
-# BandIt Plus model code (fetched from GitHub on first run) needs:
+# Model code (fetched from GitHub on first run) needs:
+# BandIt Plus
 pytorch_lightning
 spafe
 librosa
+# Demucs
+demucs
+omegaconf
+einops
+openunmix

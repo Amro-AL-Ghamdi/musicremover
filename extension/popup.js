@@ -1,12 +1,17 @@
 const DEFAULTS = {
-  enabled: true, mode: "wait", readySound: true, strength: 1, device: "auto",
+  enabled: true, mode: "wait", readySound: true, engine: "bandit", bleed: "normal", device: "auto",
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
-// Keyed by strength; numbers from bench/README.md.
+const ENGINE_HINTS = {
+  bandit: "Removes instruments, keeps dialogue and sound effects. Recommended.",
+  demucs: "About 6× faster, but sound effects are removed together with the music.",
+  dnr_demucs: "Keeps dialogue and effects like BandIt. Untested model: first use downloads it from Zenodo.",
+};
+// Numbers from bench/README.md.
 const HINTS = {
-  0: "Model output as is. Faint music can remain in quiet pauses.",
-  1: "Recommended. Pauses become fully silent and music under speech drops a bit more; effects are practically unchanged.",
-  4: "Slightly less music under speech than Normal, at a small extra cost to effects that overlap music.",
+  off: "Model output as is. Faint music can remain in quiet pauses.",
+  normal: "Recommended. Removes leftover music in pauses and lowers it under speech, at almost no cost.",
+  strong: "Removes a little more leftover music; speech and effects that overlap music get slightly softer.",
 };
 const $ = (id) => document.getElementById(id);
 
@@ -18,9 +23,10 @@ chrome.storage.sync.get(DEFAULTS, (s) => {
     else el.value = s[k];
     el.addEventListener("change", () => {
       const v = el.type === "checkbox" ? el.checked
-        : el.type === "number" || k === "strength" ? Number(el.value) : el.value;
+        : el.type === "number" ? Number(el.value) : el.value;
       chrome.storage.sync.set({ [k]: v }, k === "server" ? checkServer : undefined);
-      if (k === "strength") $("strengthHint").textContent = HINTS[v];
+      if (k === "bleed") $("bleedHint").textContent = HINTS[v];
+      if (k === "engine") $("engineHint").textContent = ENGINE_HINTS[v];
     });
   }
   // "device" is stored as auto|cpu and shown as the Force CPU checkbox.
@@ -28,7 +34,8 @@ chrome.storage.sync.get(DEFAULTS, (s) => {
   $("forceCpu").addEventListener("change", () => {
     chrome.storage.sync.set({ device: $("forceCpu").checked ? "cpu" : "auto" }, checkServer);
   });
-  $("strengthHint").textContent = HINTS[s.strength];
+  $("bleedHint").textContent = HINTS[s.bleed];
+  $("engineHint").textContent = ENGINE_HINTS[s.engine];
   checkServer();
 });
 
