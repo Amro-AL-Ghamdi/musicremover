@@ -1,5 +1,5 @@
 # Easiest: run `python install.py`, which picks the right torch build and installs this file.
-# By hand: install the GPU build of torch + torchaudio BEFORE this file, otherwise
+# By hand: install the GPU build of torch + torchaudio + torchvision (all from the same index) BEFORE this file, otherwise
 # pip installs the CPU-only build. pip keeps an already-installed torch.
 #   NVIDIA (CUDA):       https://pytorch.org/get-started/locally/
 #   AMD Linux (ROCm):    https://pytorch.org/get-started/locally/  (choose ROCm)
@@ -9,6 +9,7 @@
 # See "GPU setup" in the README.
 torch
 torchaudio
+torchvision      # used by onnx2torch; must be the build matching torch
 numpy
 pyyaml
 imageio-ffmpeg   # bundled ffmpeg (with Opus), used when ffmpeg isn't installed

@@ -131,7 +131,7 @@ matching build before `requirements.txt`:
 | NVIDIA | Windows / Linux | CUDA build from [pytorch.org](https://pytorch.org/get-started/locally/) |
 | AMD Radeon | Linux | ROCm build from [pytorch.org](https://pytorch.org/get-started/locally/) (choose *ROCm*), or AMD's wheels ([guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-pytorch.html)) |
 | AMD Radeon RX 7000 / 9000, Ryzen AI 300 / Max | Windows | AMD's ROCm PyTorch for Windows (public preview; needs Python 3.12 and a recent Adrenalin driver): [guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html). WSL2 also works: [guide](https://rocm.docs.amd.com/projects/radeon/en/latest/docs/install/wsl/install-pytorch.html) |
-| Apple Silicon | macOS | the regular `pip install torch torchaudio` (Metal is built in) |
+| Apple Silicon | macOS | the regular `pip install torch torchaudio torchvision` (Metal is built in) |
 
 AMD notes:
 * ROCm shows up in PyTorch as the `cuda` device, so nothing else needs configuring. The popup
