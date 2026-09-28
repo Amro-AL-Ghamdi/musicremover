@@ -41,8 +41,10 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
   After that, chunks are up to 60 s. YouTube often buffers only ~10 s ahead, so a shorter chunk
   is sent as soon as playback is close enough that processing would otherwise finish too late
   (based on how long recent chunks took).
-* No audio is dropped between chunks: when YouTube continues mid-cluster after a chunk was
-  sent, the bytes from the last cluster start are carried into the next chunk as a lead-in.
+* Capture reads timing from the audio data itself: the appended byte stream is rebuilt exactly
+  as the player's parser sees it, split into complete WebM clusters / MP4 fragments, and each
+  is indexed by its own timestamp. Chunks are runs of consecutive units, so it doesn't matter
+  how YouTube slices, repeats or paces its appends.
 * If playback waits more than 20 s on a spot that nothing is being captured or processed for,
   it continues muted instead of hanging.
 * The next chunk is scheduled sample-accurately so chunk boundaries don't click. Drift over 80 ms
