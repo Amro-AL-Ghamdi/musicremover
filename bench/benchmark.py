@@ -173,9 +173,8 @@ def main():
             x = pick(stems, eng.keep_stems)
             if p not in passes:
                 continue
-            music = pick(stems, eng.music_stems)
             for s in strengths:
-                out = engines.suppress_bleed(x, music, s).cpu().numpy()
+                out = eng.apply(stems, s).cpu().numpy()  # same filtering as the server
                 rows[p, s].append(measure(out, m))
                 if args.save:
                     import soundfile as sf
