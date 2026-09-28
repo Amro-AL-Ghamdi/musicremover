@@ -66,8 +66,8 @@ follow the table below, then run `pip install -r requirements.txt`.
 
 On first use it downloads the model code (ZFTurbo's MIT-licensed
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
-pinned to a specific commit) and the BandIt Plus weights (149 MB) from GitHub releases into
-`server/.cache/`.
+pinned to a specific commit) and the weights of the model you pick into `server/.cache/`:
+BandIt Plus 149 MB and Demucs 168 MB (both from GitHub releases), DnR Demucs from Zenodo.
 
 **GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
@@ -96,30 +96,52 @@ AMD notes:
 * Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
   CPU, or run the server under Linux or WSL2.
 
-**Why BandIt Plus:** it's a *cinematic* model: it separates dialogue, music and sound
-effects, so effects survive. The popular "bleedless" vocal models (BS-RoFormer, MDX23C, ...)
-separate voice from everything else, so they throw sound effects away with the music, and they
-were also 3.5× slower in our tests. See [`bench/`](bench/README.md).
+**Models** (popup: Model). All three run on the same pipeline and bleed filter:
+
+| Model | Keeps | Music left under speech | Sound effects | CPU time per audio second |
+|---|---|---|---|---|
+| **BandIt Plus** (default) | speech + sound effects | −20.6 dB | kept (−1.3 dB) | ≈6 s |
+| Demucs | voices only | −24.9 dB | **removed** (−17 dB) | ≈1.4 s |
+| DnR Demucs (experimental) | speech + sound effects | not measured | kept (by design) | not measured |
+
+* **BandIt Plus** is a *cinematic* model: it separates dialogue, music and sound effects, so
+  effects survive.
+* **Demucs** (HTDemucs fine-tuned for vocals) is about 4× faster and leaves less music under
+  speech. It sorts audio into "vocals" and "everything else", though, so sound effects go with
+  the music. Pick it when you only care about voices.
+* **DnR Demucs** is the Hybrid Demucs baseline from the BandIt paper, trained on the same
+  dialogue/music/effects data as BandIt. Its weights are on Zenodo (CC-BY-NC 4.0), which our
+  test machine couldn't reach, so it is untested. If the automatic download fails, the popup
+  badge says where to put `dnr-demucs.ckpt` by hand.
+
+The popular "bleedless" vocal models (BS-RoFormer, MDX23C, ...) were tried and dropped: they
+remove sound effects like Demucs does, and they were 3.5× slower than BandIt. See
+[`bench/`](bench/README.md).
 
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
-uses BandIt's own music estimate to push leftover music down further. Measured on test mixes
-with known ground truth:
+uses the model's own music estimate to push leftover music down further. The strength behind
+each level depends on the model, because Demucs keeps improving at much higher settings.
+Measured on test mixes with known ground truth:
 
-| Setting | Music left | Music in pauses | Sound effects kept | Speech kept |
+| Model, level | Music left | Music in pauses | Sound effects kept | Speech kept |
 |---|---|---|---|---|
-| Off | −19.5 dB | −103 dB | −1.1 dB | −0.8 dB |
-| **Normal** (default) | −20.6 dB | silent | −1.3 dB | −1.0 dB |
-| Strong | −21.2 dB | silent | −1.4 dB | −1.2 dB |
+| BandIt Plus, Off | −19.5 dB | −103 dB | −1.1 dB | −0.8 dB |
+| **BandIt Plus, Normal** (1) | −20.6 dB | silent | −1.3 dB | −1.0 dB |
+| BandIt Plus, Strong (4) | −21.2 dB | silent | −1.4 dB | −1.2 dB |
+| Demucs, Off | −22.1 dB | −54 dB | −14.4 dB | −0.1 dB |
+| **Demucs, Normal** (16) | −24.9 dB | −73 dB | −17.4 dB | −0.8 dB |
+| Demucs, Strong (64) | −25.7 dB | −79 dB | −18.9 dB | −1.3 dB |
 
-The filter costs almost nothing to run. It makes pauses fully silent and lowers music under
-speech a little. It can't remove much more than that, because the remaining bleed is music the
-model itself mistakes for speech or effects.
+The filter costs almost nothing to run. Past these levels it stops helping: the remaining
+bleed is music the model itself mistakes for speech or effects. Running a model a second time
+on its own output was also tested and didn't lower the bleed.
 
 **Speed:** on a GPU the model runs in half precision (fp16) with batches of 8 windows. If fp16
 fails or gives bad output on your card, it switches to full precision automatically and says so in the
-server log. The first chunk after starting the server is slow while the model loads. On CPU
-it runs slower than real time (≈5–6 s per second of audio on a 4-core CPU), so with
-**Pause until ready** you will wait between chunks. A GPU is strongly recommended.
+server log. The first chunk after starting the server (or switching models) is slow while the
+model loads. On CPU, BandIt runs slower than real time (≈6 s per second of audio on a 4-core
+CPU), so with **Pause until ready** you will wait between chunks; Demucs is about 4× faster.
+A GPU is strongly recommended.
 
 Environment variables: `MR_DEVICE` (pin a device and ignore the popup), `MR_PORT` (default
 `8765`), `MR_FP16=0` (disable half precision), `MR_OVERLAP` (window overlap, default 2),
@@ -137,13 +159,14 @@ In the toolbar popup you can:
   * **Pause until ready** (default): you never hear the original music
   * **Muted**
   * **Original audio**
-* force the CPU, set the bleed suppression, and turn the "ready" chime on or off
+* pick the model, force the CPU, set the bleed suppression, and turn the "ready" chime on or off
 * change the chunk length and the server URL
 
 ## Limitations
 
-* Some music bleed remains under speech (about −20 dB, i.e. roughly 1/10 of the original
-  loudness). Singing is usually treated as music and removed.
+* Some music bleed remains under speech: about −20 dB with BandIt (roughly 1/10 of the original
+  loudness), −25 dB with Demucs. BandIt usually treats singing as music and removes it;
+  Demucs keeps it.
 * BandIt Plus was trained on film-style mixes (English audiobook speech, general music,
   Freesound effects). Sounds that are part of the music, and music-like effects (sirens,
   bells), can go either way.

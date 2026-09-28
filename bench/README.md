@@ -49,6 +49,30 @@ The model runs once. The strength only changes the extra spectral mask
 | 2 | −20.9 | −144.9 | −1.3 | −1.1 | −20.5 |
 | 4 | −21.2 | −144.9 | −1.4 | −1.2 | −20.2 |
 
+### Demucs
+
+HTDemucs fine-tuned for vocals (`--engine demucs`). It keeps the "vocals" stem, and its
+"other" stem drives the filter. Speed: 1.4–1.5 s of CPU time per second of audio.
+
+| Passes | Strength | Music left | Music gap | SFX kept | Speech kept | Artifacts |
+|---|---|---|---|---|---|---|
+| 1 | 0 (off) | −22.1 | −53.9 | −14.4 | −0.1 | −22.0 |
+| 1 | 1 | −23.4 | −61.2 | −15.8 | −0.3 | −21.4 |
+| 1 | 4 | −24.1 | −66.6 | −16.4 | −0.5 | −20.7 |
+| 1 | 8 | −24.5 | −69.8 | −16.9 | −0.6 | −20.3 |
+| 1 | **16 (Normal)** | −24.9 | −73.0 | −17.4 | −0.8 | −20.0 |
+| 1 | 32 | −25.3 | −75.9 | −18.1 | −1.0 | −19.7 |
+| 1 | **64 (Strong)** | −25.7 | −78.5 | −18.9 | −1.3 | −19.4 |
+| 2 | 0 (off) | −22.2 | −56.0 | −14.6 | −0.2 | −21.9 |
+| 2 | 8 | −22.2 | −61.2 | −14.7 | −0.2 | −22.0 |
+
+Each doubling of strength lowers the bleed by about 0.4 dB and costs about 0.2–0.3 dB of
+speech. A second pass (running Demucs again on its own vocals) doesn't lower the bleed, and it
+weakens the filter, because the second pass sees almost no music. So passes are not offered.
+
+DnR Demucs (`--engine dnr_demucs`) couldn't be measured: its weights are on Zenodo, which the
+test machine couldn't reach.
+
 ### Why not a vocal model
 
 An earlier run compared BandIt Plus with the vocal-separation models that are popular for

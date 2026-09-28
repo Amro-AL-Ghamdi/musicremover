@@ -22,13 +22,20 @@
   <h2>Processing</h2>
   <div id="gpu" class="status">Checking server…</div>
   <div class="row"><input type="checkbox" id="forceCpu"><label for="forceCpu">Force CPU (don't use the GPU)</label></div>
-  <label for="strength">Music bleed suppression</label>
-  <select id="strength">
-    <option value="0">Off (model only)</option>
-    <option value="1">Normal</option>
-    <option value="4">Strong</option>
+  <label for="engine">Model</label>
+  <select id="engine">
+    <option value="bandit">BandIt Plus: keeps sound effects</option>
+    <option value="demucs">Demucs: fastest, keeps voices only</option>
+    <option value="dnr_demucs">DnR Demucs: keeps sound effects (experimental)</option>
   </select>
-  <div class="hint" id="strengthHint"></div>
+  <div class="hint" id="engineHint"></div>
+  <label for="bleed">Music bleed suppression</label>
+  <select id="bleed">
+    <option value="off">Off (model only)</option>
+    <option value="normal">Normal</option>
+    <option value="strong">Strong</option>
+  </select>
+  <div class="hint" id="bleedHint"></div>
 
   <h2>Playback</h2>
   <label for="mode">When audio isn't processed yet</label>

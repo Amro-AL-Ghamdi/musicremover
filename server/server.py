@@ -3,8 +3,8 @@
 The browser extension sends ~1 minute chunks of the YouTube audio stream
 (exactly the bytes the player appended to its MediaSource buffer: a WebM/Opus
 or fMP4/AAC init segment followed by media segments). This server decodes the
-chunk with ffmpeg, removes the music with BandIt Plus (see engines.py) and
-returns speech + sound effects as Ogg/Opus.
+chunk with ffmpeg, removes the music (see engines.py for the models) and
+returns the rest as Ogg/Opus.
 
 Run:  python server.py            (listens on http://127.0.0.1:8765)
 Env:  MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
@@ -13,8 +13,9 @@ Env:  MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
       MR_FP16=0  disable half precision on GPU
       MR_OVERLAP, MR_BATCH  window overlap (2) and batch size (8 GPU / 2 CPU)
 
-Per request the extension sends ?device=auto|cpu (the popup's "Force CPU"
-switch) and ?strength= (bleed suppression, see engines.suppress_bleed).
+Per request the extension sends ?engine=bandit|demucs|dnr_demucs, ?device=auto|cpu
+(the popup's "Force CPU" switch) and ?strength= (bleed suppression, see
+engines.suppress_bleed).
 """
 
 import os
@@ -54,23 +55,23 @@ print(f"[musicremover] GPU: {GPU_NAME or 'none usable, using CPU'}", flush=True)
 if GPU_INFO["hint"]:
     print(f"[musicremover] {GPU_INFO['hint']}", flush=True)
 
-# One separation at a time: the model (and the GPU) is shared.
+# One separation at a time: models (and the GPU) are shared.
 LOCK = threading.Lock()
-ENGINE = None
-LAST = {"device": None}
+LOADED: dict = {}
+LAST = {"engine": None, "device": None}
 
 
-def get_engine(device: str) -> "engines.Engine":
-    global ENGINE
-    if ENGINE is None:
-        print("[musicremover] loading BandIt Plus", flush=True)
-        ENGINE = engines.Engine()
-    if ENGINE.device != device:
-        print(f"[musicremover] model -> {device}", flush=True)
-        ENGINE.to(device)
+def get_engine(name: str, device: str) -> "engines.Engine":
+    if name not in LOADED:
+        print(f"[musicremover] loading {name}", flush=True)
+        LOADED[name] = engines.ENGINES[name]()
+    eng = LOADED[name]
+    if eng.device != device:
+        print(f"[musicremover] {name} -> {device}", flush=True)
+        eng.to(device)
         if device == "cpu" and torch.cuda.is_available():
             torch.cuda.empty_cache()
-    return ENGINE
+    return eng
 
 
 app = FastAPI()
@@ -113,33 +114,40 @@ def encode_opus(pcm: np.ndarray) -> bytes:
 @app.get("/health")
 def health():
     return {"ok": True, "gpu": GPU_NAME, "gpu_device": GPU, "gpu_backend": GPU_INFO["backend"],
-            "gpu_hint": GPU_INFO["hint"], "default_strength": engines.DEFAULT_STRENGTH,
+            "gpu_hint": GPU_INFO["hint"], "engines": sorted(engines.ENGINES),
+            "default_strength": engines.DEFAULT_STRENGTH, "last_engine": LAST["engine"],
             "last_device": LAST["device"], "forced_device": os.environ.get("MR_DEVICE")}
 
 
 @app.post("/separate")
-async def separate(request: Request, mime: str = "audio/webm", device: str = "auto",
-                   strength: float = engines.DEFAULT_STRENGTH):
+async def separate(request: Request, mime: str = "audio/webm", engine: str = "bandit",
+                   device: str = "auto", strength: float = engines.DEFAULT_STRENGTH):
     data = await request.body()
     if not data:
         raise HTTPException(400, "empty body")
-    strength = min(max(strength, 0.0), 16.0)
+    if engine not in engines.ENGINES:
+        raise HTTPException(400, f"unknown engine {engine!r}")
+    strength = min(max(strength, 0.0), 128.0)
     # Run the heavy work in a worker thread so the event loop stays free.
-    return await anyio.to_thread.run_sync(_separate_sync, data, mime, resolve_device(device), strength)
+    return await anyio.to_thread.run_sync(
+        _separate_sync, data, mime, engine, resolve_device(device), strength)
 
 
-def _separate_sync(data: bytes, mime: str, device: str, strength: float) -> Response:
+def _separate_sync(data: bytes, mime: str, engine: str, device: str, strength: float) -> Response:
     t0 = time.time()
     pcm = decode(data, mime)
-    with LOCK:
-        eng = get_engine(device)
-        kept = eng.keep(pcm, strength)
-        LAST.update(device=device)
+    try:
+        with LOCK:
+            eng = get_engine(engine, device)
+            kept = eng.keep(pcm, strength)
+            LAST.update(engine=engine, device=device)
+    except RuntimeError as e:  # e.g. model weights couldn't be downloaded
+        raise HTTPException(500, str(e)) from e
     out = encode_opus(kept)
     secs = pcm.shape[1] / SR
     took = time.time() - t0
     precision = "fp16" if eng.fp16 else "fp32"
-    print(f"[musicremover] {secs:.1f}s of audio in {took:.1f}s ({device}, {precision}, "
+    print(f"[musicremover] {secs:.1f}s of audio in {took:.1f}s ({engine}, {device}, {precision}, "
           f"bleed suppression {strength:g})", flush=True)
     return Response(content=out, media_type="audio/ogg",
                     headers={"X-Duration": f"{secs:.3f}", "X-Device": device})
