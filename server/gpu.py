@@ -14,17 +14,15 @@ import os
 import platform
 import subprocess
 
-import torch
-
 VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
 
 INSTALL_HINTS = {
-    "nvidia": "NVIDIA GPU found, but this PyTorch has no CUDA support. Install the CUDA build: "
-              "https://pytorch.org/get-started/locally/",
-    "amd-linux": "AMD GPU found, but this PyTorch has no ROCm support. Install the ROCm build: "
-                 "https://pytorch.org/get-started/locally/ (choose ROCm)",
+    "nvidia": "NVIDIA GPU found, but this PyTorch has no CUDA support. Run `python install.py` "
+              "to install the CUDA build.",
+    "amd-linux": "AMD GPU found, but this PyTorch has no ROCm support. Run `python install.py` "
+                 "to install the ROCm build.",
     "amd-windows": "AMD GPU found, but this PyTorch has no ROCm support. Radeon RX 7000/9000 "
-                   "(and some Ryzen AI APUs): install AMD's ROCm PyTorch for Windows (Python 3.12), "
+                   "(and some Ryzen AI APUs): run `python install.py` with Python 3.12, "
                    "see https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/"
                    "installrad/windows/install-pytorch.html",
 }
@@ -68,6 +66,8 @@ def physical_gpus():
 
 def detect():
     """Returns dict(device, name, backend, hint). device is None when only the CPU is usable."""
+    import torch  # imported here so install.py can use physical_gpus() before torch exists
+
     if torch.cuda.is_available():
         name = torch.cuda.get_device_name(0)
         if getattr(torch.version, "hip", None):

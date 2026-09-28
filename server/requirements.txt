@@ -1,4 +1,5 @@
-# GPU users: install the GPU build of torch + torchaudio BEFORE this file, otherwise
+# Easiest: run `python install.py`, which picks the right torch build and installs this file.
+# By hand: install the GPU build of torch + torchaudio BEFORE this file, otherwise
 # pip installs the CPU-only build. pip keeps an already-installed torch.
 #   NVIDIA (CUDA):       https://pytorch.org/get-started/locally/
 #   AMD Linux (ROCm):    https://pytorch.org/get-started/locally/  (choose ROCm)
