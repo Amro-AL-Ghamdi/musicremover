@@ -455,6 +455,12 @@
       }
     }
 
+    // Free unsent units that playback has left well behind (e.g. skipped by a seek).
+    // If YouTube appends them again, addUnit takes the new copy.
+    dropBehind(t) {
+      for (const x of this.units) if (!x.sent && x.bytes && x.end < t) x.bytes = null;
+    }
+
     // Unsent audio that covers time t (captured but not sent yet)?
     covers(t) {
       return this.units.some((x) => !x.sent && x.bytes && x.t <= t + 0.5 && x.end > t);
@@ -582,23 +588,32 @@
     for (const s of allSessions()) chunk = chunk || s.chunks.find((c) => c.id === m.id);
     if (inFlight && inFlight.id === m.id) inFlight = null;
     if (!chunk) return pump();
-    if (m.error) {
-      // Server down / failed: retry later. In "wait" mode the video stays paused.
+    // Retry with backoff (3 s, 6 s, 12 s, ... up to 60 s), so a server that keeps failing
+    // (e.g. a model download that fails) isn't hammered every 3 s.
+    const retryLater = (why) => {
+      chunk.retries = (chunk.retries || 0) + 1;
       chunk.state = "queued";
-      chunk.retryAt = performance.now() + 3000;
-      serverError = m.error;
-      log("server error", m.error);
+      chunk.retryAt = performance.now() + Math.min(60000, 3000 * 2 ** (chunk.retries - 1));
+      serverError = why;
+      log("server error", why);
+    };
+    if (m.error) {
+      retryLater(m.error); // in "wait" mode the video stays paused meanwhile
     } else {
       try {
-        chunk.buffer = await ensureCtx().decodeAudioData(m.audio);
+        // Keep the compressed audio (~1 MB/min) and decode on demand: decoded audio is
+        // ~1.4 GB per hour, so only chunks near the playhead stay decoded.
+        chunk.encoded = m.audio;
+        chunk.buffer = await ensureCtx().decodeAudioData(m.audio.slice(0));
         chunk.state = "done";
         chunk.bytes = null;
         serverError = null;
         procSeconds = 0.7 * procSeconds + 0.3 * (performance.now() - chunk.sentAt) / 1000;
         log(`chunk ${chunk.start.toFixed(1)}s ready in ${((performance.now() - chunk.sentAt) / 1000).toFixed(1)}s`);
       } catch (e) {
-        chunk.state = "error";
-        serverError = "could not decode processed audio";
+        chunk.encoded = null;
+        if ((chunk.retries || 0) < 3) retryLater("could not decode processed audio");
+        else { chunk.state = "error"; serverError = "could not decode processed audio"; }
       }
     }
     pump();
@@ -690,13 +705,58 @@
     return g;
   }
 
+  // Processed audio goes through one gain node that follows YouTube's volume slider and
+  // mute button (the <video>'s own audio gets those from the element itself).
+  let procOut = null;
+  function processedOut() {
+    if (!procOut || procOut.context !== ctx) {
+      procOut = ctx.createGain();
+      procOut.connect(ctx.destination);
+    }
+    return procOut;
+  }
+
   function startNode(chunk, when, offset, rate) {
     const node = ctx.createBufferSource();
     node.buffer = chunk.buffer;
     node.playbackRate.value = rate;
-    node.connect(ctx.destination);
+    node.connect(processedOut());
     node.start(when, Math.max(0, offset));
     return node;
+  }
+
+  // Decode a processed chunk from its compressed audio if it isn't decoded (anymore).
+  function ensureDecoded(c) {
+    if (!c || c.state !== "done" || c.buffer || c.decoding || !c.encoded) return;
+    c.decoding = ensureCtx().decodeAudioData(c.encoded.slice(0))
+      .then((b) => { c.buffer = b; })
+      .catch(() => { c.state = "error"; })
+      .finally(() => { c.decoding = null; });
+  }
+
+  // Free memory: decoded audio far from the playhead, sessions of videos that are gone,
+  // and captured-but-unsent audio well behind the playhead (re-captured if re-appended).
+  let lastCleanup = 0;
+  function cleanup(video, session) {
+    const now = performance.now();
+    if (now - lastCleanup < 2000) return;
+    lastCleanup = now;
+    const t = video ? video.currentTime : 0;
+    if (session) {
+      for (const c of session.chunks) {
+        const near = c.end > t - 30 && c.start < t + 300;
+        if (c.buffer && !near && c !== (current && current.chunk) && c !== (next && next.chunk)) c.buffer = null;
+      }
+      for (const tr of trackersOf(session)) tr.dropBehind(t - 60);
+    }
+    const inUse = new Set([...document.querySelectorAll("video")].map((v) => v.currentSrc || v.src));
+    for (const [url, s] of sessions) {
+      if (s === session || inUse.has(url)) { s.lastSeen = now; continue; }
+      if (now - (s.lastSeen || now) > 60000) {
+        for (const c of s.chunks) c.buffer = c.encoded = c.bytes = null;
+        sessions.delete(url);
+      } else if (!s.lastSeen) s.lastSeen = now;
+    }
   }
 
   function stopNode(p) { if (p) { try { p.node.stop(); } catch (_) {} p.node.disconnect(); } }
@@ -708,8 +768,8 @@
 
   // Is audio for time t on its way (captured but not sent, or being processed)?
   function coming(session, t) {
-    if (session.chunks.some((c) => (c.state === "queued" || c.state === "sending") &&
-        c.start - 0.5 <= t && t < c.end)) return true;
+    if (session.chunks.some((c) => (c.state === "queued" || c.state === "sending" ||
+        (c.state === "done" && !c.buffer)) && c.start - 0.5 <= t && t < c.end)) return true;
     return trackersOf(session).some((tr) => tr.covers(t));
   }
 
@@ -719,6 +779,7 @@
     const session = currentSession();
     if (session) for (const tr of trackersOf(session)) tr.maybeIdleFlush(video);
     pump();
+    cleanup(video, session);
     updateBadge(video, session);
     updateProgress(video, session);
 
@@ -733,7 +794,9 @@
     const t = video.currentTime;
     const rate = video.playbackRate;
     const chunk = session.chunkAt(t);
-    const ready = chunk && chunk.state === "done";
+    ensureDecoded(chunk);
+    const ready = chunk && chunk.state === "done" && !!chunk.buffer;
+    if (ctx) processedOut().gain.value = video.muted ? 0 : video.volume;
 
     if (ready) {
       g.gain.value = 0;
@@ -787,7 +850,8 @@
     }
     // Schedule the following chunk sample-accurately so boundaries are seamless.
     const following = session.chunks.find((c) => c.state === "done" && Math.abs(c.start - chunk.end) < 0.1);
-    if (following && (!next || next.chunk !== following)) {
+    ensureDecoded(following);
+    if (following && following.buffer && (!next || next.chunk !== following)) {
       stopNode(next);
       const when = current.ctxStart + (following.start - current.mediaStart) / rate;
       if (when > ctx.currentTime + 0.01) {

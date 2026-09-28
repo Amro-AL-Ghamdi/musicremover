@@ -100,8 +100,28 @@ Voc FT runs slower here than through audio-separator's onnxruntime path, which m
 0.94 s/audio s on CPU. We convert the ONNX model to PyTorch so it runs on every GPU backend,
 and we use 2× window overlap.
 
-DnR Demucs (`--engine dnr_demucs`) couldn't be measured: its weights are on Zenodo, which the
-test machine couldn't reach.
+### DnR Demucs and Voc FT + DnR Demucs (AMD RX 9060 XT, ROCm)
+
+Measured on a user's machine (the test machine couldn't reach Zenodo for DnR's weights). DnR
+Demucs falls back to fp32 on this GPU (fp16 gives non-finite output).
+
+| Model | Strength | Music left | Music gap | SFX kept | Speech kept | Artifacts |
+|---|---|---|---|---|---|---|
+| DnR Demucs | 0 (off) | −16.7 | −46.9 | −1.2 | −0.4 | −19.2 |
+| DnR Demucs | **1 (Normal)** | −18.5 | −56.0 | −1.5 | −0.5 | −18.5 |
+| DnR Demucs | **4 (Strong)** | −19.6 | −60.0 | −1.8 | −0.6 | −18.0 |
+| Voc FT + DnR | 0 (off) | −17.0 | −44.7 | −0.4 | −0.1 | −18.7 |
+| Voc FT + DnR | 1 | −18.8 | −48.1 | −0.6 | −0.3 | −18.0 |
+| Voc FT + DnR | 4 | −19.8 | −48.7 | −0.9 | −0.5 | −17.4 |
+
+Speed: Voc FT + DnR 0.56 s/audio s. DnR alone printed 1.68 s/audio s, but that run included
+ROCm compiling kernels on first use.
+
+The combined rows used a single filter driven by DnR's music estimate. It barely helped in
+pauses (−48 dB), because the music Voc FT lets through isn't in DnR's estimate. The engine now
+filters each part with its own model's estimate: voices at 4× the strength with Voc FT's
+"other", effects with DnR's music. Normal is now effects 4 / voices 16. Re-run
+`--engine voc_ft_dnr` for current numbers.
 
 ### Why not a vocal model
 

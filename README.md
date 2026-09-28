@@ -120,8 +120,11 @@ the default (Normal) bleed suppression:
 | Demucs | voices only | −24.9 dB | −73 dB | **removed** (−17 dB) | ≈1.4 s |
 | UVR Voc FT | voices only | −26.9 dB | −69 dB | **removed** (−25 dB) | ≈2.3 s |
 | MelBand RoFormer | voices only | **−28.1 dB** | silent | **removed** (−29 dB) | ≈11 s |
-| DnR Demucs (experimental) | speech + sound effects | not measured | not measured | kept (by design) | ≈1.3 s |
-| Voc FT + DnR Demucs (experimental) | voices + sound effects | not measured | not measured | kept (by design) | ≈4 s |
+| DnR Demucs (experimental) | speech + sound effects | −18.5 dB | −56 dB | kept (−1.5 dB) | ≈1.3 s |
+| Voc FT + DnR Demucs (experimental) | voices + sound effects | −18.8 dB¹ | −48 dB¹ | **kept (−0.6 dB)** | ≈4 s (0.56 s on an RX 9060 XT) |
+
+¹ Measured with the earlier single filter. Each part now has its own filter (see below), which
+should improve both; re-run the benchmark to get current numbers.
 
 * **BandIt Plus** is a *cinematic* model: it separates dialogue, music and sound effects, so
   effects survive.
@@ -140,10 +143,11 @@ the default (Normal) bleed suppression:
 * **MelBand RoFormer** (Kim's vocal model, fine-tuned by unwa) is a newer model from the same
   UVR community. It leaves the least music of all models here, but it is the slowest.
 * **Voc FT + DnR Demucs** combines the two: voices from Voc FT, sound effects from DnR Demucs
-  (Voc FT has no effects stem; its "other" is music and effects together). Both models run on
-  every chunk, and they're shared with the standalone options, so nothing loads twice. Its bleed
-  can't be measured here because DnR Demucs's weights are on Zenodo. On your machine, run
-  `python bench/benchmark.py --engine voc_ft_dnr` (and `--engine dnr_demucs`) to measure it.
+  (Voc FT has no effects stem; its "other" is music and effects together). It keeps effects and
+  speech better than any other model tested. Both models run on every chunk, and they're shared
+  with the standalone options, so nothing loads twice. Each part is filtered by the model it came
+  from: voices with Voc FT's own estimate (at 4× the strength), effects with DnR's music
+  estimate. Measure it with `python bench/benchmark.py --engine voc_ft_dnr`.
 
 The voice-only models (Demucs, Voc FT, MelBand) remove sound effects together with the music.
 BandIt Plus, DnR Demucs and Voc FT + DnR Demucs keep them. See [`bench/`](bench/README.md) for all
@@ -151,9 +155,9 @@ measurements, including models that were tried and dropped.
 
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
 uses the model's own music estimate to push leftover music down further. The strength behind
-each level depends on the model (BandIt, DnR Demucs and Voc FT + DnR 1/4, Demucs and Voc FT
-16/64, MelBand 4/16), because
-each model stops improving at a different point.
+each level depends on the model (BandIt and DnR Demucs 1/4, Demucs and Voc FT 16/64, MelBand
+4/16, Voc FT + DnR 4/16 for effects and 16/64 for voices), because each model stops improving
+at a different point.
 Measured on test mixes with known ground truth:
 
 | Model, level | Music left | Music in pauses | Sound effects kept | Speech kept |

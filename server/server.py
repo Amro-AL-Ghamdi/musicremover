@@ -29,7 +29,6 @@ import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 
 import engines
 import gpu
@@ -65,13 +64,32 @@ def get_engine(name: str, device: str) -> "engines.Engine":
     if eng.device != device:
         print(f"[musicremover] {name} -> {device}", flush=True)
         eng.to(device)
-        if device == "cpu" and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    # Only the model in use stays on the GPU: switching models in the popup would
+    # otherwise keep every model tried so far in GPU memory.
+    active = set(map(id, eng.parts()))
+    freed = False
+    for other in engines.loaded().values():
+        for part in other.parts():
+            if id(part) not in active and part.device != "cpu":
+                part.to("cpu")
+                freed = True
+    if freed and torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return eng
 
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def only_the_extension(request: Request, call_next):
+    # The extension calls from its background worker (Origin: chrome-extension://...),
+    # curl and the benchmark send no Origin. Web pages always send theirs, so a random
+    # site can't make this server burn GPU time.
+    origin = request.headers.get("origin")
+    if origin and not origin.startswith(("chrome-extension://", "moz-extension://")):
+        return Response("forbidden", status_code=403)
+    return await call_next(request)
 
 
 def decode(data: bytes, mime: str) -> np.ndarray:
@@ -111,6 +129,7 @@ def encode_opus(pcm: np.ndarray) -> bytes:
 def health():
     return {"ok": True, "gpu": GPU_NAME, "gpu_device": GPU, "gpu_backend": GPU_INFO["backend"],
             "gpu_hint": GPU_INFO["hint"], "engines": sorted(engines.ENGINES),
+            "loaded": {n: e.device for n, e in engines.loaded().items()},
             "default_strength": engines.DEFAULT_STRENGTH, "last_engine": LAST["engine"],
             "last_device": LAST["device"], "forced_device": os.environ.get("MR_DEVICE")}
 

@@ -169,12 +169,20 @@ class Engine:
         y = overlap_add(self._forward, x, self.chunk, overlap=overlap, batch=batch)
         return {s: y[i] for i, s in enumerate(self.stems)}
 
-    @torch.no_grad()
-    def keep(self, pcm: np.ndarray, strength: float = DEFAULT_STRENGTH) -> np.ndarray:
-        stems = self.stems_of(pcm)
+    def parts(self) -> list:
+        """The engines whose networks this one runs (itself, or a combination's parts)."""
+        return [self]
+
+    def apply(self, stems: dict, strength: float) -> torch.Tensor:
+        """What to keep from the stems, with bleed suppression. Shared by the server
+        (keep) and the benchmark, so both measure the same thing."""
         keep = sum(stems[s] for s in self.keep_stems)
         music = sum(stems[s] for s in self.music_stems)
-        out = suppress_bleed(keep, music, strength)
+        return suppress_bleed(keep, music, strength)
+
+    @torch.no_grad()
+    def keep(self, pcm: np.ndarray, strength: float = DEFAULT_STRENGTH) -> np.ndarray:
+        out = self.apply(self.stems_of(pcm), strength)
         if self.device == "cuda":
             torch.cuda.empty_cache()
         return out.cpu().numpy()
@@ -315,13 +323,20 @@ class VocFTDnREngine(Engine):
 
     Voc FT has no effects stem (its "other" is music and effects together), and DnR
     Demucs separates effects from music. Combining them keeps Voc FT's voices and adds
-    DnR's effects back. The bleed filter uses DnR's music estimate. Both models run on
-    every chunk, and they're shared with the standalone voc_ft / dnr_demucs options, so
-    switching between them doesn't load anything twice.
+    DnR's effects back. Both models run on every chunk, and they're shared with the
+    standalone voc_ft / dnr_demucs options, so switching doesn't load anything twice.
+
+    Each part gets its own bleed filter, driven by the model it came from:
+      voices  = filter(Voc FT vocals,  Voc FT other,  VOCAL_FACTOR * strength)
+      effects = filter(DnR effects,    DnR music,     strength)
+    Measured with a single DnR-driven filter, pauses only reached -48 dB because the
+    music Voc FT lets through wasn't caught; Voc FT's own filter handles that (-69 dB
+    in pauses on its own at strength 16).
     """
 
     keep_stems = ("vocals", "effects")
     music_stems = ("music",)
+    VOCAL_FACTOR = 4  # Voc FT's filter works best ~4x higher (standalone levels 16/64)
 
     def __init__(self):
         super().__init__()
@@ -342,17 +357,29 @@ class VocFTDnREngine(Engine):
     def fp16(self, value):
         pass  # set on the two models
 
+    def parts(self) -> list:
+        return [self.voc, self.dnr]
+
     @torch.no_grad()
     def stems_of(self, x) -> dict:
         v = self.voc.stems_of(x)
         d = self.dnr.stems_of(x)
-        return {"vocals": v["vocals"], "effects": d["effects"], "music": d["music"]}
+        return {"vocals": v["vocals"], "voc_other": v["other"], "effects": d["effects"], "music": d["music"]}
+
+    def apply(self, stems: dict, strength: float) -> torch.Tensor:
+        voices = suppress_bleed(stems["vocals"], stems["voc_other"], self.VOCAL_FACTOR * strength)
+        effects = suppress_bleed(stems["effects"], stems["music"], strength)
+        return voices + effects
 
 
 ENGINES = {"bandit": BanditEngine, "demucs": DemucsEngine, "dnr_demucs": DnRDemucsEngine,
            "voc_ft": VocFTEngine, "melband": MelBandEngine, "voc_ft_dnr": VocFTDnREngine}
 
 _loaded: dict = {}
+
+
+def loaded() -> dict:
+    return dict(_loaded)
 
 
 def get(name: str) -> Engine:
