@@ -13,6 +13,14 @@
   "use strict";
   const TAG = "__musicremover__";
 
+  // When the extension is installed, reloaded or updated while a YouTube tab is open,
+  // background.js injects this script again, and the previous copy is still running in
+  // the page. Stop it and take over its audio routing: a <video> can only be connected
+  // to WebAudio once.
+  const prev = window.__musicremover;
+  if (prev && typeof prev.dispose === "function") { try { prev.dispose(); } catch (_) {} }
+  let disposed = false;
+
   const settings = {
     enabled: true,
     chunkSeconds: 60,
@@ -186,7 +194,6 @@
     }
 
     onAppended(bytes, before, after) {
-      this.lastAppend = performance.now();
       let media = bytes, clean;
       const split = splitInit(bytes, this.isMp4);
       if (split > 0) {
@@ -199,6 +206,8 @@
       if (!this.init || media.length === 0) return;
       const span = newSpan(before, after);
       if (!span) return; // re-append of data already buffered
+      // Only new audio counts as activity, so re-appends can't hold off an idle flush.
+      this.lastAppend = performance.now();
 
       const p = this.pending;
       // Tolerate small overlaps/gaps between pieces (YouTube's streaming appends in
@@ -218,24 +227,45 @@
       const target = this.session.covered(q.start - 0.5, q.start)
         ? settings.chunkSeconds : Math.min(settings.firstChunkSeconds, settings.chunkSeconds);
       if (q.end - q.start >= target) {
+        // Last clean boundary that leaves at least 1 s of new (not carried) audio before it.
         let k = q.parts.length - 1;
-        while (k > 0 && !q.parts[k].clean) k--;
+        while (k > 0 && !(q.parts[k].clean && !q.parts[k].carry && q.parts[k - 1].end > q.start + 1)) k--;
         if (k > 0) this.flush(k, `reached ${target}s`);
         else if (q.end - q.start > target * 2) this.flush(q.parts.length, "no clean cut point");
       }
     }
 
-    // Emit parts[0..k) as a chunk; the rest stay pending.
+    // Emit parts[0..k) as a chunk covering [q.start, parts[k-1].end); the rest stay pending.
+    //
+    // A chunk must start at a cluster/fragment boundary to be decodable, but YouTube
+    // often continues right after a flush with the *middle* of a cluster. Dropping that
+    // would leave a hole no chunk ever covers, and "pause until ready" would wait
+    // forever. So when everything is flushed, the bytes from the last clean boundary are
+    // carried into the next chunk: its audio then starts a little earlier (audioStart)
+    // than the time range it covers (start), and playback skips that lead-in.
     flush(k, reason = "") {
       const q = this.pending;
       if (!q || k === 0) return;
       const parts = q.parts.slice(0, k);
-      q.parts = q.parts.slice(k);
-      q.start = q.parts.length ? q.parts[0].start : q.end;
-      if (!q.parts.length) this.pending = null;
+      const rest = q.parts.slice(k);
+      const start = q.start, end = parts[parts.length - 1].end;
+      const audioStart = parts[0].start;
+      if (rest.length) {
+        q.parts = rest; // k is always a clean boundary here
+        q.start = rest[0].start;
+      } else {
+        let c = parts.length - 1;
+        while (c > 0 && !parts[c].clean) c--;
+        const carry = parts.slice(c);
+        if (end - carry[0].start <= 15) {
+          q.parts = carry.map((p) => ({ ...p, carry: true }));
+          q.start = end; // the next chunk covers from where this one ends
+        } else {
+          this.pending = null; // no boundary for too long; a small gap is the lesser evil
+        }
+      }
 
-      const start = parts[0].start, end = parts[parts.length - 1].end;
-      if (this.session.covered(start, end)) return;
+      if (end - start < 0.05 || this.session.covered(start, end)) return;
       let len = q.init.length;
       for (const p of parts) len += p.bytes.length;
       const buf = new Uint8Array(len);
@@ -244,7 +274,7 @@
       for (const p of parts) { buf.set(p.bytes, off); off += p.bytes.length; }
       this.session.chunks.push({
         id: `${this.session.id}-${start.toFixed(2)}`,
-        start, end, state: "queued", bytes: buf, mime: this.mime, buffer: null, retryAt: 0,
+        start, end, audioStart, state: "queued", bytes: buf, mime: this.mime, buffer: null, retryAt: 0,
       });
       log(`chunk ${start.toFixed(1)}-${end.toFixed(1)}s (${(len / 1024) | 0} KiB) queued: ${reason}`);
       pump();
@@ -257,12 +287,21 @@
     maybeIdleFlush(video) {
       const q = this.pending;
       if (!q || !q.parts.length) return;
+      const dur = q.end - q.start; // only new audio; a carried lead-in doesn't count
+      if (dur <= 0) return;
       if (this.session.ended) return this.flush(q.parts.length, "end of video");
+      if (!video) return;
       const idle = performance.now() - this.lastAppend;
-      const blocking = video && q.start <= video.currentTime + 2;
-      const dur = q.end - q.start;
-      if (blocking && idle > 4000 && dur >= 5) this.flush(q.parts.length, `playback waiting, ${(idle / 1000) | 0}s without new audio`);
-      else if (blocking && idle > 10000 && dur > 0.5) this.flush(q.parts.length, "YouTube stopped buffering");
+      const ahead = q.start - video.currentTime; // how soon playback reaches this audio
+      // Send early enough that processing finishes before playback gets there.
+      const lead = Math.min(30, Math.max(4, 1.5 * procSeconds + 2));
+      if (ahead <= lead && idle > 1000 && dur >= 3) {
+        this.flush(q.parts.length, `playback reaches it in ${Math.max(0, ahead).toFixed(1)}s`);
+      } else if (ahead <= 0.5 && idle > 4000 && dur > 0.5) {
+        this.flush(q.parts.length, "playback waiting on it");
+      } else if (ahead <= 2 && idle > 10000 && dur > 0.5) {
+        this.flush(q.parts.length, "YouTube stopped buffering");
+      }
     }
   }
 
@@ -337,6 +376,7 @@
 
   let inFlight = null;
   let serverError = null;
+  let procSeconds = 3; // running estimate of how long the server takes per chunk
   const allSessions = () => [...sessions.values()];
 
   function currentSession() {
@@ -346,6 +386,12 @@
 
   // Send one chunk at a time, the one playback needs soonest first.
   function pump() {
+    // Watchdog: a request that never answered (e.g. the message was lost) is retried.
+    if (inFlight && performance.now() - inFlight.sentAt > 20 * 60 * 1000) {
+      log(`no answer for chunk ${inFlight.start.toFixed(1)}s after 20 min; retrying`);
+      inFlight.state = "queued";
+      inFlight = null;
+    }
     if (inFlight || !settings.enabled) return;
     const s = currentSession();
     if (!s) return;
@@ -364,7 +410,7 @@
   }
 
   window.addEventListener("message", async (ev) => {
-    if (ev.source !== window || !ev.data || !ev.data[TAG]) return;
+    if (disposed || ev.source !== window || !ev.data || !ev.data[TAG]) return;
     const m = ev.data;
     if (m[TAG] === "settings") {
       const wasEnabled = settings.enabled;
@@ -389,6 +435,7 @@
         chunk.state = "done";
         chunk.bytes = null;
         serverError = null;
+        procSeconds = 0.7 * procSeconds + 0.3 * (performance.now() - chunk.sentAt) / 1000;
         log(`chunk ${chunk.start.toFixed(1)}s ready in ${((performance.now() - chunk.sentAt) / 1000).toFixed(1)}s`);
       } catch (e) {
         chunk.state = "error";
@@ -403,13 +450,15 @@
   // Playback
   // ---------------------------------------------------------------------------
 
-  let ctx = null;
-  const routed = new WeakMap(); // video -> GainNode for the original audio
+  let ctx = (prev && prev.ctx) || null;
+  const routed = (prev && prev.routed) || new WeakMap(); // video -> GainNode for the original audio
   let current = null;           // {chunk, node, ctxStart, mediaStart, rate}
   let next = null;              // pre-scheduled following chunk
   let autoPaused = false;
   let resumeTimer = 0;
   let autoPausedAt = 0;
+  let mutedUntil = -1; // media time until which playback continues muted (stall safety net)
+  let needsReload = false; // video was loaded before the script and can't be restarted
 
   // Two-note "ready" chime, synthesized so no audio file is needed.
   // Returns how long to wait (ms) before resuming playback.
@@ -442,8 +491,24 @@
     window.addEventListener(e, () => { if (ctx) ctx.resume().catch(() => {}); }, true);
   }
 
+  function isVisible(v) {
+    const r = v.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight;
+  }
+
+  // The <video> being watched. Regular videos have one; Shorts can have several
+  // (the one on screen plus preloaded ones), so prefer a captured video that is
+  // playing, then one that is on screen.
   function mainVideo() {
-    return document.querySelector("video.html5-main-video") || document.querySelector("video");
+    const vids = [...document.querySelectorAll("video")];
+    const known = vids.filter((v) => sessions.has(v.currentSrc || v.src));
+    return known.find((v) => !v.paused && isVisible(v)) || known.find(isVisible) || known[0] ||
+      document.querySelector("#shorts-player video, video.html5-main-video") || vids[0] || null;
+  }
+
+  function playerOf(video) {
+    return (video && video.closest("#movie_player, #shorts-player, .html5-video-player")) ||
+      document.querySelector("#movie_player") || (video && video.parentElement);
   }
 
   function originalGain(video) {
@@ -475,12 +540,21 @@
     return p.mediaStart + (ctx.currentTime - p.ctxStart) * p.rate;
   }
 
+  // Is audio for time t on its way (captured but not sent, or being processed)?
+  function coming(session, t) {
+    if (session.chunks.some((c) => (c.state === "queued" || c.state === "sending") &&
+        c.start - 0.5 <= t && t < c.end)) return true;
+    return trackersOf(session).some((tr) => tr.pending && tr.pending.start <= t + 0.5 && tr.pending.end > t);
+  }
+
   function tick() {
+    if (disposed) return;
     const video = mainVideo();
     const session = currentSession();
     if (session) for (const tr of trackersOf(session)) tr.maybeIdleFlush(video);
     pump();
     updateBadge(video, session);
+    updateProgress(video, session);
 
     if (!video || !settings.enabled || !session) {
       stopProcessed();
@@ -510,10 +584,19 @@
       }
     } else {
       g.gain.value = settings.mode === "original" ? 1 : 0;
-      if (settings.mode === "wait" && !video.paused && !video.ended) {
+      if (settings.mode === "wait" && !video.paused && !video.ended && !(t < mutedUntil)) {
         autoPaused = true;
         autoPausedAt = performance.now();
         video.pause();
+      }
+      // Safety net: if nothing for this spot has been captured or is being processed
+      // after 20 s, it never will be. Play this stretch muted instead of hanging forever.
+      if (autoPaused && !resumeTimer && performance.now() - autoPausedAt > 20000 && !coming(session, t)) {
+        const nextChunk = session.chunks.filter((c) => c.start > t).sort((a, b) => a.start - b.start)[0];
+        mutedUntil = nextChunk ? nextChunk.start : t + 10;
+        log(`no audio captured for ${t.toFixed(1)}s; playing muted until ${mutedUntil.toFixed(1)}s`);
+        autoPaused = false;
+        video.play().catch(() => {});
       }
     }
 
@@ -534,7 +617,7 @@
       const when = ctx.currentTime + 0.02;
       const mediaStart = t + 0.02 * rate;
       current = { chunk, ctxStart: when, mediaStart, rate,
-                  node: startNode(chunk, when, mediaStart - chunk.start, rate) };
+                  node: startNode(chunk, when, mediaStart - chunk.audioStart, rate) };
     }
     // Schedule the following chunk sample-accurately so boundaries are seamless.
     const following = session.chunks.find((c) => c.state === "done" && Math.abs(c.start - chunk.end) < 0.1);
@@ -543,7 +626,7 @@
       const when = current.ctxStart + (following.start - current.mediaStart) / rate;
       if (when > ctx.currentTime + 0.01) {
         next = { chunk: following, ctxStart: when, mediaStart: following.start, rate,
-                 node: startNode(following, when, 0, rate) };
+                 node: startNode(following, when, following.start - following.audioStart, rate) };
       }
     }
   }
@@ -563,7 +646,7 @@
 
   let badge = null;
   function updateBadge(video, session) {
-    const player = document.querySelector("#movie_player") || (video && video.parentElement);
+    const player = playerOf(video);
     if (!player) return;
     if (!badge || !badge.isConnected) {
       badge = document.createElement("div");
@@ -574,6 +657,7 @@
     }
     let text = "", show = true;
     if (!settings.enabled) show = false;
+    else if (needsReload && !session) text = "Music remover: reload the page to remove music from this video";
     else if (!session) text = "Music remover: waiting for audio…";
     else if (serverError) text = "Music remover: server error – " + serverError.slice(0, 80);
     else {
@@ -582,18 +666,143 @@
       if (c && c.state === "done") {
         text = `Music removed ✓ (${done} chunk${done === 1 ? "" : "s"} ready)`;
         show = video.paused; // stay out of the way while watching
-      } else if (autoPaused) text = "Removing music… paused until ready";
+      } else if (video.currentTime < mutedUntil) text = "Music remover: this part couldn't be captured – playing muted";
+      else if (autoPaused) text = "Removing music… paused until ready";
       else text = "Removing music…";
     }
     badge.textContent = text;
     badge.style.opacity = show && text ? "1" : "0";
   }
 
-  setInterval(tick, 100);
+  // ---------------------------------------------------------------------------
+  // Progress on the play bar: which parts are processed, and how far ahead
+  // ---------------------------------------------------------------------------
+
+  const COLORS = { done: "#2ecc71", sending: "#f5a623", queued: "rgba(255,255,255,.55)" };
+  let bar = null, label = null, barKey = "";
+
+  function fmtTime(s) {
+    s = Math.max(0, Math.floor(s));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  }
+
+  // End of the processed stretch that playback is in (or about to enter).
+  function removedUpTo(session, t) {
+    let reach = t;
+    for (;;) {
+      const c = session.chunks.find((x) => x.state === "done" && x.start - 0.1 <= reach && x.end > reach + 0.01);
+      if (!c) return reach;
+      reach = c.end;
+    }
+  }
+
+  // Video length: from the element, or from YouTube's player while the stream is open.
+  function videoDuration(video, player) {
+    if (video && video.duration > 0 && isFinite(video.duration)) return video.duration;
+    const d = player && typeof player.getDuration === "function" ? player.getDuration() : 0;
+    return d > 0 && isFinite(d) ? d : 0;
+  }
+
+  function updateProgress(video, session) {
+    const player = playerOf(video);
+    const dur = videoDuration(video, player);
+    if (!player || !session || !settings.enabled || !dur) {
+      if (bar) bar.style.display = "none";
+      if (label) label.style.display = "none";
+      return;
+    }
+    // Regular videos: sit just above YouTube's progress bar (it hides with the controls).
+    // Shorts and anything else: our own strip at the bottom of the video.
+    const ytBar = player.querySelector(".ytp-progress-bar");
+    const host = ytBar || player;
+    if (!bar || !bar.isConnected || bar.parentElement !== host) {
+      if (bar) bar.remove();
+      bar = document.createElement("div");
+      bar.title = "Music remover: green = music removed, amber = processing, grey = waiting";
+      bar.style.cssText = "position:absolute;left:0;right:0;height:4px;z-index:45;pointer-events:none;" +
+        (ytBar ? "top:-7px;" : "bottom:0;background:rgba(0,0,0,.35);");
+      host.appendChild(bar);
+      barKey = "";
+    }
+    bar.style.display = "";
+
+    const key = session.chunks.map((c) => `${c.start.toFixed(1)}-${c.end.toFixed(1)}:${c.state}`).join(",") + "|" + dur;
+    if (key !== barKey) {
+      barKey = key;
+      bar.textContent = "";
+      for (const c of session.chunks) {
+        const color = COLORS[c.state];
+        if (!color) continue;
+        const seg = document.createElement("div");
+        seg.style.cssText = `position:absolute;top:0;bottom:0;background:${color};` +
+          `left:${(100 * c.start / dur).toFixed(3)}%;width:${(100 * (c.end - c.start) / dur).toFixed(3)}%`;
+        bar.appendChild(seg);
+      }
+    }
+
+    // "Music removed to 2:35" next to YouTube's time display (or on our strip).
+    const t = video.currentTime;
+    const reach = removedUpTo(session, Math.max(0, t - 0.2));
+    const text = reach >= dur - 0.5 ? "· music removed to the end" :
+      reach > t + 0.5 ? `· music removed to ${fmtTime(reach)}` :
+      session.chunks.some((c) => c.state === "sending") ? "· removing music…" : "· music remover waiting";
+    const timeDisplay = player.querySelector(".ytp-time-display");
+    const labelHost = timeDisplay || bar;
+    if (!label || !label.isConnected || label.parentElement !== labelHost) {
+      if (label) label.remove();
+      label = document.createElement("span");
+      label.style.cssText = timeDisplay ? "margin-left:6px;color:#2ecc71;" :
+        "position:absolute;right:6px;bottom:6px;font:500 11px Roboto,Arial,sans-serif;color:#fff;" +
+        "background:rgba(0,0,0,.6);padding:2px 6px;border-radius:8px;white-space:nowrap";
+      labelHost.appendChild(label);
+    }
+    label.style.display = "";
+    if (label.textContent !== text) label.textContent = text;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Start-up
+  // ---------------------------------------------------------------------------
+
+  const timer = setInterval(tick, 100);
   document.addEventListener("seeked", tick, true);
   document.addEventListener("play", tick, true);
-  document.addEventListener("pause", stopProcessed, true);
+  document.addEventListener("pause", () => { if (!disposed) stopProcessed(); }, true);
   document.addEventListener("ratechange", tick, true);
+
+  window.__musicremover = {
+    get ctx() { return ctx; },
+    routed,
+    dispose() {
+      disposed = true;
+      clearInterval(timer);
+      clearTimeout(resumeTimer);
+      settings.enabled = false; // the old appendBuffer wrappers stay installed but go idle
+      stopProcessed();
+      for (const el of [badge, bar, label]) if (el) el.remove();
+    },
+  };
+
+  // A video that was already playing before this script ran (the tab was open when the
+  // extension was installed or reloaded) created its MediaSource before our hooks, so its
+  // audio can't be captured. Restart it at the same position through YouTube's player API;
+  // the reloaded stream goes through the hooks.
+  function captureAlreadyLoaded() {
+    const v = document.querySelector("#shorts-player video, video.html5-main-video") || document.querySelector("video");
+    const src = v && (v.currentSrc || v.src);
+    if (!src || !src.startsWith("blob:") || sessions.has(src)) return;
+    const player = playerOf(v);
+    const data = player && typeof player.getVideoData === "function" && player.getVideoData();
+    if (!data || !data.video_id || typeof player.loadVideoById !== "function") {
+      needsReload = true;
+      return;
+    }
+    const t = typeof player.getCurrentTime === "function" ? player.getCurrentTime() : v.currentTime;
+    log(`restarting the already-loaded video at ${t.toFixed(1)}s so its audio can be captured`);
+    player.loadVideoById({ videoId: data.video_id, startSeconds: t });
+  }
+  setTimeout(captureAlreadyLoaded, 300);
 
   window.postMessage({ [TAG]: "hello" }, "*");
 })();

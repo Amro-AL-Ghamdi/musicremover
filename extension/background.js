@@ -55,6 +55,24 @@ async function health() {
   return res.json();
 }
 
+// Content scripts from the manifest only reach pages loaded after install. Inject into
+// YouTube tabs that are already open, so they work without a page reload. inject.js
+// takes over from any older copy of itself and restarts the playing video so its
+// audio goes through the new hooks.
+async function injectIntoOpenTabs() {
+  const tabs = await chrome.tabs.query({ url: ["https://www.youtube.com/*", "https://m.youtube.com/*"] });
+  for (const tab of tabs) {
+    const target = { tabId: tab.id };
+    try {
+      await chrome.scripting.executeScript({ target, files: ["bridge.js"] });
+      await chrome.scripting.executeScript({ target, files: ["inject.js"], world: "MAIN" });
+    } catch (e) {
+      console.warn("[musicremover] couldn't inject into tab", tab.id, e);
+    }
+  }
+}
+chrome.runtime.onInstalled.addListener(injectIntoOpenTabs);
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const job = msg.type === "separate" ? separate(msg) : msg.type === "health" ? health() : null;
   if (!job) return false;

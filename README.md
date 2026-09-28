@@ -38,12 +38,24 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
   through `SourceBuffer.appendBuffer`.
 * The chunk is cut only at segment/cluster boundaries, so each chunk decodes on its own.
 * The first chunk after a start or seek is shorter (20 s by default), so playback starts sooner.
-  After that, chunks are 60 s. If YouTube stops buffering further ahead, whatever is buffered
-  gets sent early.
+  After that, chunks are up to 60 s. YouTube often buffers only ~10 s ahead, so a shorter chunk
+  is sent as soon as playback is close enough that processing would otherwise finish too late
+  (based on how long recent chunks took).
+* No audio is dropped between chunks: when YouTube continues mid-cluster after a chunk was
+  sent, the bytes from the last cluster start are carried into the next chunk as a lead-in.
+* If playback waits more than 20 s on a spot that nothing is being captured or processed for,
+  it continues muted instead of hanging.
 * The next chunk is scheduled sample-accurately so chunk boundaries don't click. Drift over 80 ms
   (after a seek, a playback speed change, and so on) triggers a resync.
+* A thin strip on YouTube's progress bar shows the processed parts (green), the part being
+  processed (amber) and parts waiting to be sent (grey). Next to the time it says how far the
+  music has been removed, e.g. "· music removed to 2:35". On Shorts the strip is at the bottom
+  of the video.
 * A small badge on the player shows the status. When a video was held while its audio was
   processed, a short chime plays just before it starts.
+* Works on regular videos and Shorts. Tabs that were already open when the extension was
+  installed or reloaded are picked up automatically: the playing video restarts at the same
+  position so its audio can be captured.
 
 ## Setup
 
@@ -168,7 +180,7 @@ Environment variables: `MR_DEVICE` (pin a device and ignore the popup), `MR_PORT
 ### 2. Extension
 
 1. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `extension/` folder.
-2. Open (or reload) a YouTube video.
+2. Open a YouTube video or Short. Already-open YouTube tabs are picked up automatically.
 
 In the toolbar popup you can:
 
@@ -190,7 +202,8 @@ In the toolbar popup you can:
   bells), can go either way.
 * DRM-protected videos (Premium movies and similar) use encrypted buffers and can't be processed.
 * Playback faster or slower than 1× changes the pitch of the processed audio.
-* The extension only hooks the desktop/mobile web player on `youtube.com` (not embeds on other sites).
+* The extension only hooks the player on `youtube.com` (videos and Shorts), not embeds on other
+  sites.
 
 ## Development
 

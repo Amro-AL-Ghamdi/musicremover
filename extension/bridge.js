@@ -10,6 +10,10 @@
   chrome.storage.onChanged.addListener(pushSettings);
   pushSettings();
 
+  // After the extension is reloaded or updated, this copy is orphaned (its
+  // chrome.runtime is gone) and background.js injects a fresh one. Step aside.
+  const alive = () => { try { return !!chrome.runtime?.id; } catch (_) { return false; } };
+
   function toBase64(bytes) {
     let s = "";
     for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
@@ -22,8 +26,9 @@
     return out.buffer;
   }
 
-  window.addEventListener("message", (ev) => {
+  window.addEventListener("message", function onMessage(ev) {
     if (ev.source !== window || !ev.data || !ev.data[TAG]) return;
+    if (!alive()) return window.removeEventListener("message", onMessage);
     const m = ev.data;
     if (m[TAG] === "hello") return pushSettings();
     if (m[TAG] !== "separate") return;

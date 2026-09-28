@@ -2,9 +2,12 @@
   "manifest_version": 3,
   "name": "YouTube Music Remover",
   "version": "0.1.0",
-  "description": "Removes background music from YouTube videos while you watch, using a local Demucs server.",
-  "permissions": ["storage"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "description": "Removes background music from YouTube videos and Shorts while you watch, using a local server.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "http://127.0.0.1/*", "http://localhost/*",
+    "https://www.youtube.com/*", "https://m.youtube.com/*"
+  ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
