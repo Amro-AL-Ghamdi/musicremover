@@ -82,7 +82,7 @@ On first use it downloads the model code (ZFTurbo's MIT-licensed
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training),
 pinned to a specific commit) and the weights of the model you pick into `server/.cache/`:
 BandIt Plus 149 MB, Demucs 168 MB, UVR Voc FT 67 MB and MelBand RoFormer 913 MB (all from
-GitHub releases), DnR Demucs from Zenodo.
+GitHub releases), DnR Demucs from Zenodo. Voc FT + DnR Demucs uses the Voc FT and DnR Demucs files.
 
 **GPU / CPU:** the server uses an NVIDIA, AMD or Apple Silicon GPU automatically when
 PyTorch can see one. The popup shows which GPU was found. Tick **Force CPU** to run on the
@@ -111,7 +111,7 @@ AMD notes:
 * Older Radeons on Windows (RX 6000 and earlier) aren't supported by ROCm for Windows. Use the
   CPU, or run the server under Linux or WSL2.
 
-**Models** (popup: Model). All five run on the same pipeline and bleed filter. Numbers are at
+**Models** (popup: Model). All six run on the same pipeline and bleed filter. Numbers are at
 the default (Normal) bleed suppression:
 
 | Model | Keeps | Music left under speech | Music in pauses | Sound effects | CPU time per audio second |
@@ -120,7 +120,8 @@ the default (Normal) bleed suppression:
 | Demucs | voices only | −24.9 dB | −73 dB | **removed** (−17 dB) | ≈1.4 s |
 | UVR Voc FT | voices only | −26.9 dB | −69 dB | **removed** (−25 dB) | ≈2.3 s |
 | MelBand RoFormer | voices only | **−28.1 dB** | silent | **removed** (−29 dB) | ≈11 s |
-| DnR Demucs (experimental) | speech + sound effects | not measured | not measured | kept (by design) | not measured |
+| DnR Demucs (experimental) | speech + sound effects | not measured | not measured | kept (by design) | ≈1.3 s |
+| Voc FT + DnR Demucs (experimental) | voices + sound effects | not measured | not measured | kept (by design) | ≈4 s |
 
 * **BandIt Plus** is a *cinematic* model: it separates dialogue, music and sound effects, so
   effects survive.
@@ -138,14 +139,20 @@ the default (Normal) bleed suppression:
   audio-separator also scales its output by the input's peak level, which we don't.
 * **MelBand RoFormer** (Kim's vocal model, fine-tuned by unwa) is a newer model from the same
   UVR community. It leaves the least music of all models here, but it is the slowest.
+* **Voc FT + DnR Demucs** combines the two: voices from Voc FT, sound effects from DnR Demucs
+  (Voc FT has no effects stem; its "other" is music and effects together). Both models run on
+  every chunk, and they're shared with the standalone options, so nothing loads twice. Its bleed
+  can't be measured here because DnR Demucs's weights are on Zenodo. On your machine, run
+  `python bench/benchmark.py --engine voc_ft_dnr` (and `--engine dnr_demucs`) to measure it.
 
 The voice-only models (Demucs, Voc FT, MelBand) remove sound effects together with the music.
-Only BandIt Plus and DnR Demucs keep them. See [`bench/`](bench/README.md) for all
+BandIt Plus, DnR Demucs and Voc FT + DnR Demucs keep them. See [`bench/`](bench/README.md) for all
 measurements, including models that were tried and dropped.
 
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
 uses the model's own music estimate to push leftover music down further. The strength behind
-each level depends on the model (BandIt 1/4, Demucs and Voc FT 16/64, MelBand 4/16), because
+each level depends on the model (BandIt, DnR Demucs and Voc FT + DnR 1/4, Demucs and Voc FT
+16/64, MelBand 4/16), because
 each model stops improving at a different point.
 Measured on test mixes with known ground truth:
 

@@ -16,6 +16,8 @@ const STRENGTHS = {
   dnr_demucs: { off: 0, normal: 1, strong: 4 },
   voc_ft: { off: 0, normal: 16, strong: 64 },
   melband: { off: 0, normal: 4, strong: 16 },
+  // Filter driven by DnR Demucs's music estimate, like dnr_demucs itself (not yet measured).
+  voc_ft_dnr: { off: 0, normal: 1, strong: 4 },
 };
 
 // engine: model; device: "auto" (GPU if the server has one) or "cpu"; bleed: off|normal|strong.

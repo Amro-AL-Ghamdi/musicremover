@@ -8,6 +8,7 @@ const ENGINE_HINTS = {
   dnr_demucs: "Keeps dialogue and effects like BandIt. Untested model: first use downloads it from Zenodo.",
   voc_ft: "UVR-MDX-NET-Voc_FT. Fast, with less music under speech than Demucs; sound effects are removed with the music.",
   melband: "MelBand RoFormer (Kim, fine-tuned by unwa). Least music of all models, but about 5× slower than Voc FT. Removes sound effects.",
+  voc_ft_dnr: "Voices from Voc FT plus sound effects from DnR Demucs. Runs both models (about 1.4× Voc FT alone). Untested: first use downloads DnR Demucs from Zenodo.",
 };
 // Numbers from bench/README.md.
 const HINTS = {
