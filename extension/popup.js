@@ -1,10 +1,11 @@
 const DEFAULTS = {
-  enabled: true, mode: "wait", readySound: true, engine: "voc_ft_dnr", bleed: "normal", device: "auto",
+  enabled: true, mode: "wait", readySound: true, engine: "voc_ft_dnr", bleed: "normal", device: "auto", cache: true,
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
 const ENGINE_HINTS = {
   voc_ft_dnr: "Voices from Voc FT plus sound effects from DnR Demucs. Recommended. Runs both models (about 1.4× Voc FT alone).",
   voc_ft: "UVR-MDX-NET-Voc_FT alone. Fastest, but sound effects are removed together with the music.",
+  voc_ft_int8: "Voc FT quantized to int8, always on the CPU: about 2× faster than Voc FT on a CPU, with slightly softer speech. For PCs without a usable GPU. Removes sound effects.",
   dnr_demucs: "DnR Demucs alone: keeps dialogue and sound effects, with more music left under speech than the mix.",
 };
 // Numbers from bench/README.md.
@@ -36,8 +37,20 @@ chrome.storage.sync.get(DEFAULTS, (s) => {
   });
   $("bleedHint").textContent = HINTS[s.bleed];
   $("engineHint").textContent = ENGINE_HINTS[s.engine];
+  $("clearCache").addEventListener("click", () => chrome.runtime.sendMessage({ type: "cache-clear" }, showCacheStats));
+  showCacheStats();
   checkServer();
 });
+
+function showCacheStats() {
+  chrome.runtime.sendMessage({ type: "cache-stats" }, (res) => {
+    if (chrome.runtime.lastError || !res || res.error) return;
+    const mb = res.bytes / 1048576;
+    $("cacheStats").textContent = res.videos
+      ? `${res.videos} video${res.videos === 1 ? "" : "s"} stored (${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB)`
+      : "Nothing stored yet";
+  });
+}
 
 function checkServer() {
   const st = $("gpu");

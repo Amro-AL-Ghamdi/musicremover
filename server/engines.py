@@ -4,6 +4,8 @@
   voc_ft_dnr  (default) Voices from voc_ft + sound effects from dnr_demucs.
   voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound effects
               are removed together with the music.
+  voc_ft_int8 Voc FT quantized to int8 for weaker machines: runs on the CPU with
+              onnxruntime, about 2x faster than voc_ft on the CPU.
   dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt paper):
               splits speech / music / effects; keeps speech + effects. Weights
               come from Zenodo (CC-BY-NC 4.0).
@@ -247,6 +249,49 @@ class VocFTEngine(_VocalsOnly):
         return v.reshape(B, C, T) * self.COMPENSATE
 
 
+class VocFTInt8Engine(VocFTEngine):
+    """Voc FT for weaker machines: its frequency layers (MatMul, most of the work besides
+    the convolutions) quantized to int8, run by onnxruntime on the CPU.
+
+    Only the MatMuls are quantized, dynamically (activation ranges measured per call):
+    full static int8 (convolutions too) was faster still but lost ~5 dB of speech and let
+    more music through in pauses, because the model's activations span too wide a range
+    for 8 bits. On the benchmark mixes (4-core CPU, Normal bleed suppression) it matches
+    voc_ft within measurement noise except speech, 0.4 dB softer, at about half the CPU
+    time; see bench/README.md.
+    The quantized file is made from the downloaded model on first use (a few seconds).
+    """
+
+    cpu_only = True
+
+    def __init__(self):
+        Engine.__init__(self)
+        import onnxruntime as ort
+        path = os.path.join(CACHE, "UVR-MDX-NET-Voc_FT.int8.onnx")
+        if not os.path.exists(path):
+            from onnxruntime.quantization import QuantType, quantize_dynamic
+            src = _fetch(f"{UVR_REL}/UVR-MDX-NET-Voc_FT.onnx")
+            print("[musicremover] quantizing Voc FT to int8 (once)", flush=True)
+            tmp = path + ".part.onnx"
+            quantize_dynamic(src, tmp, weight_type=QuantType.QInt8, op_types_to_quantize=["MatMul"],
+                             per_channel=True)
+            os.replace(tmp, path)
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.session = ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
+        self.net = lambda x: torch.from_numpy(self.session.run(None, {"input": x.cpu().numpy()})[0])
+        self.stems = ["vocals", "other"]
+        self.chunk = self.HOP * (self.DIM_T - 1)
+
+    def to(self, device: str):
+        return self  # always the CPU (onnxruntime), whatever device is asked for
+
+    def batch(self) -> int:
+        # One window at a time is fastest on a CPU and needs the least memory
+        # (measured: batch 1 0.85 s per audio second / 3.5 GB peak, batch 4 1.11 s / 10.7 GB).
+        return self.batch_override or int(os.environ.get("MR_BATCH", 1))
+
+
 class VocFTDnREngine(Engine):
     """Voices from UVR Voc FT + sound effects from DnR Demucs (the default).
 
@@ -301,7 +346,8 @@ class VocFTDnREngine(Engine):
         return voices + effects
 
 
-ENGINES = {"voc_ft_dnr": VocFTDnREngine, "voc_ft": VocFTEngine, "dnr_demucs": DnRDemucsEngine}
+ENGINES = {"voc_ft_dnr": VocFTDnREngine, "voc_ft": VocFTEngine, "voc_ft_int8": VocFTInt8Engine,
+           "dnr_demucs": DnRDemucsEngine}
 DEFAULT_ENGINE = "voc_ft_dnr"
 
 _loaded: dict = {}
