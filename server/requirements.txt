@@ -17,3 +17,4 @@ uvicorn
 # UVR Voc FT (ONNX model, converted to PyTorch so it runs on any GPU)
 onnx
 onnx2torch
+onnxruntime      # runs the int8 Voc FT on the CPU

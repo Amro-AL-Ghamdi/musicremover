@@ -39,6 +39,8 @@
     mode: "wait",
     // Chime when a video that was held for processing can start playing.
     readySound: true,
+    // Reuse processed audio of recently watched videos (stored by background.js).
+    cache: true,
   };
 
   // console.log (not debug) so the lines show at Chrome's default console level.
@@ -219,6 +221,9 @@
       this.videoId = new URLSearchParams(location.search).get("v") || location.pathname;
       this.chunks = [];   // {id, start, end, audioStart, state: queued|sending|done|error, bytes, mime, buffer}
       this.ended = false;
+      this.created = performance.now();
+      this.cacheState = null; // null | "loading" | "done"
+      this.cacheVideo = null; // {videoId, duration, profile} once the cache has been read
     }
     covered(start, end) {
       let c = 0;
@@ -391,13 +396,16 @@
       if (this.buf.length) this.feed(new Uint8Array(0), this.sb.timestampOffset || 0, true);
     }
 
-    // The unsent, contiguous run of units starting at or after time t.
+    // The unsent, contiguous run of units starting at or after time t. Units whose audio
+    // is already there (e.g. restored from the cache) are skipped, not sent again; they
+    // stay captured in case the model settings change and that audio is dropped.
     runFrom(t) {
       const u = this.units;
-      let i = u.findIndex((x) => !x.sent && x.bytes && x.end > t - 0.25);
+      const todo = (x) => !x.sent && x.bytes && !this.session.covered(x.t, x.end);
+      let i = u.findIndex((x) => x.end > t - 0.25 && todo(x));
       if (i < 0) return null;
       let j = i + 1;
-      while (j < u.length && !u[j].sent && u[j].bytes && u[j].initId === u[i].initId &&
+      while (j < u.length && todo(u[j]) && u[j].initId === u[i].initId &&
              u[j].t - u[j - 1].end < 0.15 && u[j].t > u[j - 1].t) j++;
       return u.slice(i, j);
     }
@@ -573,6 +581,14 @@
     activeProfile = p;
     serverError = null;
     for (const s of allSessions()) {
+      // Audio restored from the cache was made with the old settings and can't be redone
+      // (its source bytes aren't here); drop it and look up the cache for the new ones.
+      if (s.chunks.some((c) => c.cacheKey)) {
+        if ((current && current.chunk.cacheKey) || (next && next.chunk.cacheKey)) stopProcessed();
+        s.chunks = s.chunks.filter((c) => !c.cacheKey);
+      }
+      s.cacheState = null;
+      s.cacheVideo = null;
       for (const c of s.chunks) {
         c.retries = 0;
         c.retryAt = 0;
@@ -617,9 +633,29 @@
     window.postMessage({ [TAG]: "separate", id: c.id, mime: c.mime, bytes: c.bytes }, "*");
   }
 
+  // Requests to background.js (the cache) through bridge.js.
+  let nextReq = 1;
+  const pending = new Map(); // reqId -> {resolve, reject}
+  function request(type, payload, transfer) {
+    return new Promise((resolve, reject) => {
+      const reqId = nextReq++;
+      pending.set(reqId, { resolve, reject });
+      window.postMessage({ [TAG]: "request", type, reqId, payload }, "*", transfer || []);
+      setTimeout(() => { if (pending.delete(reqId)) reject(new Error("timeout")); }, 30000);
+    });
+  }
+
   window.addEventListener("message", async (ev) => {
     if (disposed || ev.source !== window || !ev.data || !ev.data[TAG]) return;
     const m = ev.data;
+    if (m[TAG] === "reply") {
+      const p = pending.get(m.reqId);
+      if (!p) return;
+      pending.delete(m.reqId);
+      if (m.error) p.reject(new Error(m.error));
+      else p.resolve({ ...m.res, audio: m.audio });
+      return;
+    }
     if (m[TAG] === "settings") {
       const wasEnabled = settings.enabled;
       Object.assign(settings, m.settings);
@@ -667,6 +703,7 @@
         chunk.retries = 0;
         serverError = null;
         procSeconds = 0.7 * procSeconds + 0.3 * (performance.now() - chunk.sentAt) / 1000;
+        if (!outdated) saveToCache(chunk, m.audio);
         log(`chunk ${chunk.start.toFixed(1)}s ${isRedo ? "re-processed" : "ready"} in ` +
             `${((performance.now() - chunk.sentAt) / 1000).toFixed(1)}s`);
         // If it's playing (or scheduled) right now, switch to the new audio.
@@ -682,6 +719,84 @@
     pump();
     tick();
   });
+
+  // ---------------------------------------------------------------------------
+  // Cache of recently watched videos (background.js keeps the last 10)
+  // ---------------------------------------------------------------------------
+
+  // Which YouTube video a session plays, from the player itself (the page URL can
+  // already point at the next Short while this one plays). Null during ads and
+  // until the player knows the video, so nothing is cached under the wrong video.
+  function videoIdentity(video) {
+    const player = playerOf(video);
+    if (!player || player.classList.contains("ad-showing")) return null;
+    const data = typeof player.getVideoData === "function" && player.getVideoData();
+    const duration = videoDuration(video, player);
+    if (!data || !data.video_id || !duration) return null;
+    // The element's own length must agree with the player's (it doesn't while an ad plays).
+    if (video.duration > 0 && isFinite(video.duration) && Math.abs(video.duration - duration) > 1.5) return null;
+    return { videoId: data.video_id, duration };
+  }
+
+  // Looks up the current video's stored audio once; stored ranges become finished chunks,
+  // so only the gaps are captured and sent.
+  function loadCache(session, video) {
+    if (!settings.cache || session.cacheState) return;
+    const id = videoIdentity(video);
+    if (!id) return;
+    const prof = profile();
+    session.cacheState = "loading";
+    session.cacheAskedAt = performance.now();
+    session.cacheVideo = { ...id, profile: prof };
+    request("cache-get", { videoId: id.videoId, profile: prof, duration: id.duration })
+      .then(({ chunks }) => {
+        if (session.cacheVideo?.profile !== prof || prof !== profile()) return;
+        let added = 0;
+        for (const c of chunks) {
+          if (session.covered(c.start, c.end)) continue;
+          session.chunks.push({
+            id: `${session.id}-cache-${c.key}`, start: c.start, end: c.end, audioStart: c.start,
+            state: "done", bytes: null, mime: null, buffer: null, encoded: null, retryAt: 0, cacheKey: c.key,
+          });
+          added++;
+        }
+        if (added) log(`restored ${added} processed chunk${added === 1 ? "" : "s"} of ${id.videoId} from the cache`);
+      })
+      .catch((e) => log("cache unavailable", e.message))
+      .finally(() => { if (session.cacheVideo?.profile === prof) session.cacheState = "done"; });
+  }
+
+  // Don't send anything until the cache has answered, so audio it has isn't processed
+  // again. Waits at most a few seconds: for the player to report the video, and for
+  // the answer (it normally takes milliseconds).
+  function cacheSettled(session) {
+    const now = performance.now();
+    if (!settings.cache || session.cacheState === "done") return true;
+    if (session.cacheState === "loading") return now - session.cacheAskedAt > 3000;
+    return now - session.created > 4000;
+  }
+
+  function saveToCache(chunk, audio) {
+    if (!settings.cache || chunk.cacheKey) return;
+    const session = allSessions().find((s) => s.chunks.includes(chunk));
+    const v = session && session.cacheVideo;
+    if (!v || v.profile !== chunk.sentProfile) return;
+    request("cache-put", { videoId: v.videoId, profile: v.profile, duration: v.duration,
+                           start: chunk.start, end: chunk.end, audio: audio.slice(0) })
+      .catch((e) => log("couldn't cache chunk", e.message));
+  }
+
+  // Fetch a cached chunk's audio when playback gets near it.
+  function fetchCached(c) {
+    c.decoding = request("cache-audio", { key: c.cacheKey })
+      .then(({ audio }) => { c.encoded = audio; return ensureCtx().decodeAudioData(audio.slice(0)); })
+      .then((b) => { c.buffer = b; })
+      .catch(() => {
+        // Gone from the cache (e.g. evicted): forget it, so that stretch is processed again.
+        for (const s of allSessions()) s.chunks = s.chunks.filter((x) => x !== c);
+      })
+      .finally(() => { c.decoding = null; });
+  }
 
   // ---------------------------------------------------------------------------
   // Playback
@@ -790,7 +905,8 @@
 
   // Decode a processed chunk from its compressed audio if it isn't decoded (anymore).
   function ensureDecoded(c) {
-    if (!c || c.state !== "done" || c.buffer || c.decoding || !c.encoded) return;
+    if (!c || c.state !== "done" || c.buffer || c.decoding) return;
+    if (!c.encoded) { if (c.cacheKey) fetchCached(c); return; }
     c.decoding = ensureCtx().decodeAudioData(c.encoded.slice(0))
       .then((b) => { c.buffer = b; })
       .catch(() => { c.state = "error"; })
@@ -808,7 +924,10 @@
     if (session) {
       for (const c of session.chunks) {
         const near = c.end > t - 30 && c.start < t + 300;
-        if (c.buffer && !near && c !== (current && current.chunk) && c !== (next && next.chunk)) c.buffer = null;
+        if (!near && c !== (current && current.chunk) && c !== (next && next.chunk)) {
+          c.buffer = null;
+          if (c.cacheKey && !c.decoding) c.encoded = null; // fetched again from the cache
+        }
       }
       for (const tr of trackersOf(session)) tr.dropBehind(t - 60);
     }
@@ -840,7 +959,8 @@
     if (disposed) return;
     const video = mainVideo();
     const session = currentSession();
-    if (session) for (const tr of trackersOf(session)) tr.maybeIdleFlush(video);
+    if (session) loadCache(session, video);
+    if (session && cacheSettled(session)) for (const tr of trackersOf(session)) tr.maybeIdleFlush(video);
     pump();
     cleanup(video, session);
     updateBadge(video, session);

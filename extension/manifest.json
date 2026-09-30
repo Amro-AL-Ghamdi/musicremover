@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Remover",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Removes background music from YouTube videos and Shorts while you watch, using a local server.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "unlimitedStorage"],
   "host_permissions": [
     "http://127.0.0.1/*", "http://localhost/*",
     "https://www.youtube.com/*", "https://m.youtube.com/*"

@@ -26,6 +26,7 @@
   <select id="engine">
     <option value="voc_ft_dnr">UVR Voc FT + DnR Demucs: keeps voices and sound effects</option>
     <option value="voc_ft">UVR Voc FT: fastest, keeps voices only</option>
+    <option value="voc_ft_int8">UVR Voc FT int8: for weaker PCs / CPU only, keeps voices only</option>
     <option value="dnr_demucs">DnR Demucs: keeps sound effects</option>
   </select>
   <div class="hint" id="engineHint"></div>
@@ -45,6 +46,8 @@
     <option value="original">Keep playing, original audio</option>
   </select>
   <div class="row"><input type="checkbox" id="readySound"><label for="readySound">Play a chime when the video can start</label></div>
+  <div class="row"><input type="checkbox" id="cache"><label for="cache">Remember the last 10 videos, so rewatching them doesn't process them again</label></div>
+  <div class="row"><button id="clearCache">Clear</button><span class="hint" id="cacheStats"></span></div>
 
   <h2>Advanced</h2>
   <label for="chunkSeconds">Chunk length (seconds)</label>

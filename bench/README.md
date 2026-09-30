@@ -105,6 +105,33 @@ Voc FT runs slower here than through audio-separator's onnxruntime path, which m
 0.94 s/audio s on CPU. We convert the ONNX model to PyTorch so it runs on every GPU backend,
 and we use 2× window overlap.
 
+### UVR Voc FT int8 (4-core CPU)
+
+`--engine voc_ft_int8`: Voc FT with its MatMul (frequency) layers quantized to int8
+(dynamic, per channel), run by onnxruntime on the CPU. Speed: 1.08 s of CPU time per second
+of audio, against ≈2.3 s for Voc FT under PyTorch; peak memory ≈3.5 GB.
+
+| strength | music left | music-only gap | SFX kept | speech kept | artifacts |
+|---|---|---|---|---|---|
+| 0 (off) | −25.2 | −47.5 | −19.1 | −0.4 | −21.7 |
+| **16 (Normal)** | −27.0 | −74.2 | −25.8 | −1.4 | −20.0 |
+| **64 (Strong)** | −27.4 | −85.6 | −27.4 | −2.1 | −19.4 |
+
+Other ways of making it lighter that were measured (CPU time per audio second, average of
+per-mix dB at strength 16, Voc FT under PyTorch for reference: 2.26 s, speech −1.2 dB,
+music-only gap −76 dB):
+
+| variant | CPU time | speech kept | music-only gap | verdict |
+|---|---|---|---|---|
+| same model under onnxruntime, fp32 | 1.55 s | −1.2 | −76 | identical output, 1.5× faster |
+| **int8 MatMul only, dynamic** (shipped) | 1.21 s (0.85 s at batch 1) | −1.6 | −76 | kept |
+| int8 everything, static (MinMax calibration) | 1.00 s | −6.1 | −49 | loses speech and lets music through |
+| same, first and last conv kept in fp32 | 1.04 s | −5.3 | −48 | no better |
+| int8 everything, dynamic (ConvInteger) | slower than fp32 | | | output unusable |
+
+Static int8 calibration of the full model needs more than 15 GB of RAM with 256-frame
+windows; it only fits when calibrated on 32-frame slices (the model accepts any length).
+
 ### DnR Demucs and Voc FT + DnR Demucs (AMD RX 9060 XT, ROCm)
 
 Measured on a user's machine (the test machine couldn't reach Zenodo for DnR's weights). DnR

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Music Remover
+Comment=Removes background music from YouTube videos while you watch
+Exec=AppRun
+Icon=musicremover
+Terminal=true
+Categories=AudioVideo;Audio;

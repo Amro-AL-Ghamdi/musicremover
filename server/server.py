@@ -13,7 +13,7 @@ Env:  MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
       MR_FP16=0  disable half precision on GPU
       MR_OVERLAP, MR_BATCH  window overlap (2) and batch size (8 GPU / 2 CPU)
 
-Per request the extension sends ?engine=voc_ft_dnr|voc_ft|dnr_demucs, ?device=auto|cpu
+Per request the extension sends ?engine=voc_ft_dnr|voc_ft|voc_ft_int8|dnr_demucs, ?device=auto|cpu
 (the popup's "Force CPU" switch) and ?strength= (bleed suppression, see
 engines.suppress_bleed).
 """
@@ -61,6 +61,8 @@ LAST = {"engine": None, "device": None}
 
 def get_engine(name: str, device: str) -> "engines.Engine":
     eng = engines.get(name)  # loaded once (on the CPU); combined engines share their parts
+    if getattr(eng, "cpu_only", False):
+        device = "cpu"
     # Only the model in use stays on the GPU. Free the others *before* moving this one
     # there, otherwise switching models briefly needs room for both and can run out of
     # GPU memory.
@@ -176,6 +178,7 @@ def _separate_sync(data: bytes, mime: str, engine: str, device: str, strength: f
     try:
         with LOCK:
             eng = get_engine(engine, device)
+            device = eng.device
             kept = keep_with_oom_retry(eng, pcm, strength)
             LAST.update(engine=engine, device=device)
     except RuntimeError as e:  # e.g. model weights couldn't be downloaded

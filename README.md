@@ -61,6 +61,31 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 
 ## Quick start
 
+### Download the app (no Python needed)
+
+1. **Download** from the [latest release](https://github.com/siba1426/musicremover/releases/latest):
+   * Windows: **`MusicRemover-Setup.exe`**. Run it; no admin rights needed. Windows may warn
+     that the installer isn't signed: click **More info → Run anyway**.
+   * Linux: **`MusicRemover-x86_64.AppImage`**. Make it executable (`chmod +x`, or
+     Properties → Permissions) and double-click it. Or use `MusicRemover-linux-x86_64.tar.gz`:
+     unpack it and run `./run.sh`.
+2. **Start Music Remover** (Start menu / desktop on Windows, the AppImage on Linux). The first
+   start finds your GPU and downloads the matching PyTorch (1–3 GB, or ~200 MB for the CPU
+   build) and the models. Later starts take a few seconds. Leave the window open while you
+   watch; closing it stops the server.
+3. **Load the extension** once: the window prints the extension folder
+   (`%LOCALAPPDATA%\MusicRemover\extension` on Windows, `~/.local/share/musicremover/extension`
+   on Linux). Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**,
+   click **Load unpacked** and pick that folder.
+4. Open a YouTube video. Already-open YouTube tabs are picked up automatically.
+
+The app contains Python and every dependency except PyTorch, which depends on your GPU.
+PyTorch, the models and the extension copy go to the folder above; uninstalling on Windows
+removes it, on Linux delete it yourself. After installing a newer version, reload the
+extension in `chrome://extensions`.
+
+### Or install from source
+
 1. **Download** this repository: `git clone https://github.com/siba1426/musicremover.git`, or on
    GitHub click **Code → Download ZIP** and unzip it.
 2. **Install** (needs [Python](https://www.python.org/downloads/) 3.9+; on Windows tick
@@ -70,8 +95,8 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 
    It finds your GPU (NVIDIA, AMD, Apple Silicon) and installs the matching PyTorch, or the
    small CPU-only build if there's no usable GPU. It also installs everything else and downloads
-   the default model, then starts the server. Nothing else is needed: ffmpeg comes bundled if
-   you don't have it, and git is optional.
+   the default models, then starts the server. Nothing else is needed: ffmpeg comes bundled if
+   you don't have it.
 3. **Next time, start the server** with **`run.bat`** (Windows) or **`./run.sh`**, and leave it
    running while you watch.
 4. **Load the extension** once: open `chrome://extensions` (or `edge://extensions`), turn on
@@ -96,7 +121,7 @@ python server.py
 ```
 
 ffmpeg is taken from your PATH if installed, otherwise from the bundled `imageio-ffmpeg`
-package. The model code is fetched with git if available, otherwise as a zip from GitHub.
+package.
 
 `install.py` picks the PyTorch build for your hardware: CUDA 13.0 or 12.6 for NVIDIA (based on
 your driver version), ROCm for AMD, Metal for Apple Silicon, or the small CPU-only build.
@@ -147,6 +172,7 @@ the default (Normal) bleed suppression:
 |---|---|---|---|---|---|
 | **Voc FT + DnR Demucs** (default) | voices + sound effects | −18.8 dB¹ | −48 dB¹ | **kept (−0.6 dB)** | ≈4 s (0.56 s on an RX 9060 XT) |
 | UVR Voc FT | voices only | **−26.9 dB** | −69 dB | **removed** (−25 dB) | ≈2.3 s |
+| UVR Voc FT int8 | voices only | −27.0 dB | −74 dB | **removed** (−26 dB) | **≈1.1 s** (always CPU) |
 | DnR Demucs | speech + sound effects | −18.5 dB | −56 dB | kept (−1.5 dB) | ≈1.3 s |
 
 ¹ Measured with the earlier single filter. Each part now has its own filter (see below), which
@@ -163,6 +189,10 @@ should improve both; re-run the benchmark to get current numbers.
   the music. The ONNX file is converted to PyTorch with `onnx2torch`, so it runs on any GPU
   PyTorch supports (including AMD). Its output matches audio-separator's to 27 dB after volume
   matching; audio-separator also scales its output by the input's peak level, which we don't.
+* **UVR Voc FT int8** is Voc FT for PCs without a usable GPU: its frequency layers are quantized
+  to 8-bit integers and it runs with onnxruntime on the CPU, about 2× faster than Voc FT on the
+  CPU and with less memory (≈3.5 GB). It scores the same as Voc FT, except speech is 0.4 dB
+  softer. The quantized file is made from the Voc FT download on first use, in a few seconds.
 * **DnR Demucs** is the Hybrid Demucs baseline from the BandIt paper, trained on
   dialogue/music/effects mixes (DnR). Its weights are on Zenodo (CC-BY-NC 4.0). If the automatic
   download fails, the popup badge says where to put `dnr-demucs.ckpt` by hand.
@@ -173,7 +203,7 @@ dropped (BandIt Plus, HTDemucs, MelBand RoFormer and others).
 **Bleed suppression** (popup: Off / Normal / Strong): after the model, an extra spectral mask
 uses the model's own music estimate to push leftover music down further. The strength behind
 each level depends on the model (Voc FT + DnR 4/16 for effects and 16/64 for voices, Voc FT
-16/64, DnR Demucs 1/4), because each model stops improving
+and Voc FT int8 16/64, DnR Demucs 1/4), because each model stops improving
 at a different point.
 Measured on test mixes with known ground truth:
 
@@ -182,6 +212,9 @@ Measured on test mixes with known ground truth:
 | Voc FT, Off | −24.8 dB | −47 dB | −20.4 dB | −0.2 dB |
 | **Voc FT, Normal** (16) | −26.9 dB | −69 dB | −25.0 dB | −1.0 dB |
 | Voc FT, Strong (64) | −27.3 dB | −80 dB | −26.5 dB | −1.6 dB |
+| Voc FT int8, Off | −25.2 dB | −48 dB | −19.1 dB | −0.4 dB |
+| **Voc FT int8, Normal** (16) | −27.0 dB | −74 dB | −25.8 dB | −1.4 dB |
+| Voc FT int8, Strong (64) | −27.4 dB | −86 dB | −27.4 dB | −2.1 dB |
 
 The filter costs almost nothing to run. Past these levels it stops helping: the remaining
 bleed is music the model itself mistakes for speech or effects. Running a model a second time
@@ -212,6 +245,10 @@ In the toolbar popup you can:
   * **Muted**
   * **Original audio**
 * pick the model, force the CPU, set the bleed suppression, and turn the "ready" chime on or off
+* turn the cache of recently watched videos on or off, or clear it: processed audio of the last
+  10 videos is kept (≈1 MB per minute), so rewatching them, or seeking back, plays it straight
+  away; only parts that weren't processed yet go to the server. It's kept per model and bleed
+  setting, and dropped when the video's length changes
 * change the chunk length and the server URL
 
 ## Limitations
@@ -232,3 +269,20 @@ In the toolbar popup you can:
 `MediaSource`/`SourceBuffer` before YouTube's player loads. `bridge.js` (isolated world) relays
 messages to `background.js`, which makes the localhost request. Doing that from the
 service worker avoids YouTube's CSP and the browser's local-network restrictions.
+
+### Building the app
+
+`packaging/build.py` builds the downloadable app: a portable Python
+([python-build-standalone](https://github.com/astral-sh/python-build-standalone), pinned) with
+every dependency except PyTorch, plus the server and the extension. PyTorch is left out
+because the right build depends on the user's GPU; the first start installs it with
+`pip --user` into the data folder (`MR_HOME`, `PYTHONUSERBASE`), which also holds the models.
+
+```bash
+python packaging/build.py linux     # dist/MusicRemover-x86_64.AppImage + .tar.gz
+python packaging/build.py windows   # then: ISCC.exe packaging\windows\musicremover.iss
+```
+
+Each target has to be built on its own OS. `.github/workflows/release.yml` builds both, plus
+the Windows installer (Inno Setup), and pushing a tag like `v1.0.0` attaches them to a
+GitHub release.
