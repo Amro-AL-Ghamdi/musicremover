@@ -37,6 +37,7 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{autoprograms}\Music Remover"; Filename: "{app}\MusicRemover.bat"; WorkingDir: "{app}"; IconFilename: "{app}\musicremover.ico"
 Name: "{autodesktop}\Music Remover"; Filename: "{app}\MusicRemover.bat"; WorkingDir: "{app}"; IconFilename: "{app}\musicremover.ico"; Tasks: desktopicon
+Name: "{autoprograms}\Stop Music Remover"; Filename: "{app}\Stop MusicRemover.bat"; WorkingDir: "{app}"; IconFilename: "{app}\musicremover.ico"
 
 [Run]
 Filename: "{app}\MusicRemover.bat"; WorkingDir: "{app}"; Description: "Start Music Remover now (the first start downloads PyTorch for your GPU, 1-3 GB)"; Flags: postinstall nowait shellexec skipifsilent
