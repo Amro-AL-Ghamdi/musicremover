@@ -45,7 +45,7 @@ jobs:
           ./t/stop.sh | grep -q "isn't running"
       - run: python packaging/build.py linux
       - name: Smoke test
-        run: build/linux/MusicRemover/python/bin/python3 -c "import fastapi, uvicorn, numpy, onnx, imageio_ffmpeg; print('ok')"
+        run: build/linux/MusicRemover/python/bin/python3 -c "import os, sys, fastapi, uvicorn, numpy, onnx, einops; from importlib.util import find_spec as f; assert all(f(m) for m in ('demucs', 'julius', 'onnx2torch')), 'missing package'; assert not any(f(m) for m in ('torch', 'imageio_ffmpeg')), 'must not be bundled'; assert os.listdir(os.path.join(sys.prefix, '..', 'licenses', 'packages')), 'no licenses'; print('ok')"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -75,7 +75,7 @@ jobs:
           if (-not ($out -match "isn't running")) { exit 1 }
       - run: python packaging/build.py windows
       - name: Smoke test
-        run: build\windows\MusicRemover\python\python.exe -c "import fastapi, uvicorn, numpy, onnx, imageio_ffmpeg; print('ok')"
+        run: build\windows\MusicRemover\python\python.exe -c "import os, sys, fastapi, uvicorn, numpy, onnx, einops; from importlib.util import find_spec as f; assert all(f(m) for m in ('demucs', 'julius', 'onnx2torch')), 'missing package'; assert not any(f(m) for m in ('torch', 'imageio_ffmpeg')), 'must not be bundled'; assert os.listdir(os.path.join(sys.prefix, '..', 'licenses', 'packages')), 'no licenses'; print('ok')"
       - name: Build the installer
         shell: pwsh
         run: |
