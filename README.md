@@ -294,3 +294,10 @@ python packaging/build.py windows   # then: ISCC.exe packaging\windows\musicremo
 Each target has to be built on its own OS. `.github/workflows/release.yml` builds both, plus
 the Windows installer (Inno Setup), and pushing a tag like `v1.0.0` attaches them to a
 GitHub release.
+
+## License
+
+The code is [MIT-licensed](LICENSE). Model weights aren't part of the repository; they're
+downloaded from their publishers and keep their own licenses. **The DnR Demucs weights (used
+by the default model) are CC BY-NC 4.0, non-commercial only.** See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
