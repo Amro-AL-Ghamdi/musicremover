@@ -103,7 +103,8 @@ def build_app(target, work, python_url):
         if name.endswith(".py") or name == "requirements.txt":
             shutil.copy2(os.path.join(ROOT, "server", name), server)
     shutil.copytree(os.path.join(ROOT, "extension"), os.path.join(app, "app", "extension"))
-    shutil.copy2(os.path.join(ROOT, "README.md"), app)
+    for name in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+        shutil.copy2(os.path.join(ROOT, name), app)
 
     # Compile now: the AppImage is read-only, so Python couldn't cache them at run time.
     log("compiling")
