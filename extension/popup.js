@@ -5,7 +5,7 @@ const DEFAULTS = {
 const ENGINE_HINTS = {
   voc_ft_dnr: "Voices from Voc FT plus sound effects from DnR Demucs. Recommended. Runs both models (about 1.4× Voc FT alone).",
   voc_ft: "UVR-MDX-NET-Voc_FT alone. Fastest, but sound effects are removed together with the music.",
-  voc_ft_int8: "Voc FT quantized to int8, always on the CPU: about 2× faster than Voc FT on a CPU, with slightly softer speech. For PCs without a usable GPU. Removes sound effects.",
+  voc_ft_int8: "Voc FT quantized to int8 for weaker PCs: about 2× faster than Voc FT on a CPU, with slightly softer speech. On a GPU it runs the regular Voc FT there. Removes sound effects.",
   dnr_demucs: "DnR Demucs alone: keeps dialogue and sound effects, with more music left under speech than the mix.",
 };
 // Numbers from bench/README.md.

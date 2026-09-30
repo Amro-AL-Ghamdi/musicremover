@@ -4,8 +4,9 @@
   voc_ft_dnr  (default) Voices from voc_ft + sound effects from dnr_demucs.
   voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound effects
               are removed together with the music.
-  voc_ft_int8 Voc FT quantized to int8 for weaker machines: runs on the CPU with
-              onnxruntime, about 2x faster than voc_ft on the CPU.
+  voc_ft_int8 Voc FT quantized to int8 for weaker machines: on the CPU it runs with
+              onnxruntime, about 2x faster than voc_ft there; on a GPU it runs
+              the regular Voc FT.
   dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt paper):
               splits speech / music / effects; keeps speech + effects. Weights
               come from Zenodo (CC-BY-NC 4.0).
@@ -253,6 +254,10 @@ class VocFTInt8Engine(VocFTEngine):
     """Voc FT for weaker machines: its frequency layers (MatMul, most of the work besides
     the convolutions) quantized to int8, run by onnxruntime on the CPU.
 
+    It follows the device like every model: on the CPU (no usable GPU, or Force CPU) it
+    runs the int8 model; on a GPU it runs the regular Voc FT there in half precision
+    (the same network, faster than int8 on a CPU), shared with the voc_ft option.
+
     Only the MatMuls are quantized, dynamically (activation ranges measured per call):
     full static int8 (convolutions too) was faster still but lost ~5 dB of speech and let
     more music through in pauses, because the model's activations span too wide a range
@@ -262,9 +267,8 @@ class VocFTInt8Engine(VocFTEngine):
     The quantized file is made from the downloaded model on first use (a few seconds).
     """
 
-    cpu_only = True
-
     def __init__(self):
+        self.gpu = None  # the regular Voc FT, while running on a GPU
         Engine.__init__(self)
         import onnxruntime as ort
         path = os.path.join(CACHE, "UVR-MDX-NET-Voc_FT.int8.onnx")
@@ -283,11 +287,48 @@ class VocFTInt8Engine(VocFTEngine):
         self.stems = ["vocals", "other"]
         self.chunk = self.HOP * (self.DIM_T - 1)
 
+    # Where it runs follows the regular model while that's in use (the server may move it
+    # back to the CPU to make room for another model; then int8 takes over again).
+    def _on_gpu(self) -> bool:
+        return self.gpu is not None and self.gpu.device != "cpu"
+
+    @property
+    def device(self):
+        return self.gpu.device if self._on_gpu() else "cpu"
+
+    @device.setter
+    def device(self, value):
+        pass  # set through to()
+
+    @property
+    def fp16(self):
+        return self.gpu.fp16 if self._on_gpu() else False
+
+    @fp16.setter
+    def fp16(self, value):
+        pass
+
     def to(self, device: str):
-        return self  # always the CPU (onnxruntime), whatever device is asked for
+        if device == "cpu":
+            if self._on_gpu():
+                self.gpu.to("cpu")
+            self.gpu = None
+        else:
+            self.gpu = get("voc_ft").to(device)
+        return self
+
+    def parts(self) -> list:
+        return [self.gpu] if self.gpu is not None else [self]
+
+    def stems_of(self, x) -> dict:
+        if self._on_gpu():
+            return self.gpu.stems_of(x)
+        return super().stems_of(x)
 
     def batch(self) -> int:
-        # One window at a time is fastest on a CPU and needs the least memory
+        if self._on_gpu():
+            return self.gpu.batch()
+        # int8 on the CPU: one window at a time is fastest and needs the least memory
         # (measured: batch 1 0.85 s per audio second / 3.5 GB peak, batch 4 1.11 s / 10.7 GB).
         return self.batch_override or int(os.environ.get("MR_BATCH", 1))
 
