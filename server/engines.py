@@ -1,7 +1,7 @@
 """Music removal models. Each engine takes stereo float32 audio [2, T] at
 44.1 kHz and returns what should be *kept*, same shape.
 
-  voc_ft_dnr  (default) Voices from voc_ft + sound sfx from dnr_demucs.
+  voc_ft_cdx23  (default) Voices from voc_ft + sound sfx from MVSEPCDX23.
   voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound sfx
               are removed together with the music.
   voc_ft_int8 Voc FT quantized to int8 for weaker machines: on the CPU it runs with
@@ -337,15 +337,14 @@ class VocFTInt8Engine(VocFTEngine):
 class VocFTMVSEPEngine(Engine):
     """Voices from UVR Voc FT + sound sfx from DnR Demucs (the default).
 
-    Voc FT has no sfx stem (its "other" is music and sfx together), and DnR
-    Demucs separates sfx from music. Combining them keeps Voc FT's voices and adds
-    DnR's sfx back. Both models run on every chunk, and they're shared with the
-    standalone voc_ft / dnr_demucs options, so switching doesn't load anything twice.
+    Voc FT has no sfx stem (its "other" is music and sfx together), and cdx23 separates sfx from music. Combining them keeps Voc FT's voices and adds
+    cdx23's sfx back. Both models run on every chunk, and they're shared with the
+    standalone voc_ft / MVSEPCDX23 options, so switching doesn't load anything twice.
 
     Each part gets its own bleed filter, driven by the model it came from:
       voices  = filter(Voc FT vocals,  Voc FT other,  VOCAL_FACTOR * strength)
-      sfx = filter(DnR sfx,    DnR music,     strength)
-    Measured with a single DnR-driven filter, pauses only reached -48 dB because the
+      sfx = filter(cdx23 sfx,    cdx23 music,     strength)
+    Measured with a single cdx23-driven filter, pauses only reached -48 dB because the
     music Voc FT lets through wasn't caught; Voc FT's own filter handles that (-69 dB
     in pauses on its own at strength 16).
     """

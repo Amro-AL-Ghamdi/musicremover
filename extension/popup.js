@@ -3,10 +3,10 @@ const DEFAULTS = {
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
 const ENGINE_HINTS = {
-  voc_ft_cdx23: "Voices from Voc FT plus sound effects from DnR Demucs. Recommended. Runs both models (about 1.4× Voc FT alone).",
+  voc_ft_cdx23: "Voices from Voc FT plus sound effects from MVSEPCDX23. Recommended. Runs both models (about 1.4× Voc FT alone).",
   voc_ft: "UVR-MDX-NET-Voc_FT alone. Fastest, but sound effects are removed together with the music.",
   voc_ft_int8: "Voc FT quantized to int8 for weaker PCs: about 2× faster than Voc FT on a CPU, with slightly softer speech. On a GPU it runs the regular Voc FT there. Removes sound effects.",
-  cdx23: "DnR Demucs alone: keeps dialogue and sound effects, with more music left under speech than the mix.",
+  cdx23: "MVSEPCDX23 alone: keeps dialogue and sound effects, with more music left under speech than the mix.",
 };
 // Numbers from bench/README.md.
 const HINTS = {
