@@ -11,11 +11,14 @@ torch
 torchaudio
 torchvision      # used by onnx2torch; must be the build matching torch
 numpy
-imageio-ffmpeg   # bundled ffmpeg (with Opus), used when ffmpeg isn't installed
+imageio-ffmpeg   # ffmpeg (with Opus), used when ffmpeg isn't installed; GPLv3, so the app installs it at first start
 fastapi
 uvicorn
-# HTDemucs model code, used by the CDX23 engine
-demucs           
+# HTDemucs model code, used by the CDX23 engine (the app bundles demucs and julius
+# without dependencies, so einops and julius are listed here themselves)
+demucs
+einops
+julius
 # UVR Voc FT (ONNX model, converted to PyTorch so it runs on any GPU)
 onnx
 onnx2torch

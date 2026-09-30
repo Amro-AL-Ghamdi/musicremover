@@ -83,8 +83,9 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
    click **Load unpacked** and pick that folder.
 4. Open a YouTube video. Already-open YouTube tabs are picked up automatically.
 
-The app contains Python and every dependency except PyTorch, which depends on your GPU.
-PyTorch, the models and the extension copy go to the folder above; uninstalling on Windows
+The app contains Python and every dependency except PyTorch, which depends on your GPU,
+and ffmpeg (if it isn't installed already). PyTorch, ffmpeg, the models and the extension
+copy go to the folder above; uninstalling on Windows
 removes it, on Linux delete it yourself. After installing a newer version, reload the
 extension in `chrome://extensions`.
 
@@ -282,9 +283,11 @@ service worker avoids YouTube's CSP and the browser's local-network restrictions
 
 `packaging/build.py` builds the downloadable app: a portable Python
 ([python-build-standalone](https://github.com/astral-sh/python-build-standalone), pinned) with
-every dependency except PyTorch, plus the server and the extension. PyTorch is left out
-because the right build depends on the user's GPU; the first start installs it with
-`pip --user` into the data folder (`MR_HOME`, `PYTHONUSERBASE`), which also holds the models.
+every dependency except PyTorch and `imageio-ffmpeg`, plus the server and the extension.
+PyTorch is left out because the right build depends on the user's GPU, and `imageio-ffmpeg`
+because its FFmpeg binary is GPLv3; the first start installs both with `pip --user` into the
+data folder (`MR_HOME`, `PYTHONUSERBASE`), which also holds the models. The build collects
+the license files of everything it bundles into `licenses/` in the app.
 
 ```bash
 python packaging/build.py linux     # dist/MusicRemover-x86_64.AppImage + .tar.gz
@@ -298,6 +301,7 @@ GitHub release.
 ## License
 
 The code is [MIT-licensed](LICENSE). Model weights aren't part of the repository; they're
-downloaded from their publishers and keep their own licenses. **The DnR Demucs weights (used
-by the default model) are CC BY-NC 4.0, non-commercial only.** See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+downloaded from their publishers and keep their own licenses: MVSEP CDX23 is MIT-licensed,
+and UVR Voc FT is published by the UVR project under MIT. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for every model and package and their
+licenses.
