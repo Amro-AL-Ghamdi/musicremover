@@ -37,6 +37,9 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
   still works with YouTube's newer SABR/UMP streaming, because every byte eventually goes
   through `SourceBuffer.appendBuffer`.
 * The chunk is cut only at segment/cluster boundaries, so each chunk decodes on its own.
+* YouTube's player is asked to keep at least a minute of the video buffered ahead of the
+  playhead (its `html5_minimum_readahead_seconds` setting, normally 0), also while the video is
+  held for processing, so the next chunk can be processed before playback needs it.
 * The first chunk after a start or seek is shorter (20 s by default), so playback starts sooner.
   After that, chunks are up to 60 s. YouTube often buffers only ~10 s ahead, so a shorter chunk
   is sent as soon as playback is close enough that processing would otherwise finish too late

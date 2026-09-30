@@ -27,6 +27,71 @@
   }
   let disposed = false;
 
+  // ---------------------------------------------------------------------------
+  // Readahead: ask YouTube's player to keep at least READAHEAD_SECONDS of the video
+  // buffered ahead of the playhead, also while the video is held for processing.
+  // By default it decides for itself (often only 10-30 s), and audio it hasn't
+  // downloaded yet can't be processed, which is what makes playback stop and wait.
+  //
+  // The player reads this from its experiment flags (html5_minimum_readahead_seconds,
+  // default 0 = no minimum) in the page config ytcfg's WEB_PLAYER_CONTEXT_CONFIGS,
+  // once, when it's created. This script runs before the page's own scripts, so it
+  // wraps ytcfg.set and adds the flag to every player config. It's fixed (not a popup
+  // setting) because the settings arrive only after the player has read its config.
+  // ---------------------------------------------------------------------------
+
+  const READAHEAD_SECONDS = 60;
+  const READAHEAD_FLAG = "html5_minimum_readahead_seconds";
+
+  function withReadahead(flags) {
+    const parts = flags ? flags.split("&") : [];
+    const i = parts.findIndex((p) => p.startsWith(READAHEAD_FLAG + "="));
+    if (i >= 0) {
+      // Keep YouTube's value if it already asks for more.
+      if (Number(parts[i].split("=")[1]) >= READAHEAD_SECONDS) return flags;
+      parts.splice(i, 1);
+    }
+    parts.push(`${READAHEAD_FLAG}=${READAHEAD_SECONDS}`);
+    return parts.join("&");
+  }
+
+  function addReadahead(cfg) {
+    let players;
+    try { players = cfg.get("WEB_PLAYER_CONTEXT_CONFIGS"); } catch (_) { return; }
+    if (!players || typeof players !== "object") return;
+    for (const c of Object.values(players)) {
+      if (c && typeof c.serializedExperimentFlags === "string") {
+        c.serializedExperimentFlags = withReadahead(c.serializedExperimentFlags);
+      }
+    }
+  }
+
+  function wrapYtcfg(cfg) {
+    if (!cfg || typeof cfg.set !== "function" || typeof cfg.get !== "function" || cfg.__mrReadahead) return;
+    const set = cfg.set;
+    cfg.set = function () {
+      const r = set.apply(this, arguments);
+      addReadahead(cfg);
+      return r;
+    };
+    cfg.__mrReadahead = true;
+    addReadahead(cfg);
+  }
+
+  if (window.ytcfg) {
+    wrapYtcfg(window.ytcfg); // injected into an open tab: applies to players created from now on
+  } else {
+    // The page declares it with `var ytcfg = {...}` later; catch that assignment.
+    let value;
+    try {
+      Object.defineProperty(window, "ytcfg", {
+        configurable: true, enumerable: true,
+        get() { return value; },
+        set(v) { value = v; wrapYtcfg(v); },
+      });
+    } catch (_) {}
+  }
+
   const settings = {
     enabled: true,
     chunkSeconds: 60,
