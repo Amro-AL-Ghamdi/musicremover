@@ -1,5 +1,5 @@
 const DEFAULTS = {
-  enabled: true, mode: "wait", readySound: true, engine: "voc_ft_dnr", bleed: "normal", device: "auto", cache: true,
+  enabled: true, mode: "wait", readySound: true, engine: "voc_ft_cdx23", bleed: "normal", device: "auto", cache: true,
   chunkSeconds: 60, firstChunkSeconds: 20, server: "http://127.0.0.1:8765",
 };
 const ENGINE_HINTS = {

@@ -8,16 +8,16 @@ stay under their own licenses. Check them before any commercial use.
 
 | Model | Source | License |
 |---|---|---|
-| Demucs |https://github.com/adefossez/demucs| **MIT**,Copyright (c) Meta Platforms, Inc. and affiliates. |
-| UVR-MDX-NET-Voc_FT, used by `voc_ft`, `voc_ft_int8` and `voc_ft_dnr` | [Ultimate Vocal Remover model repository](https://github.com/TRvlvr/model_repo) | as published by the [UVR project](https://github.com/Anjok07/ultimatevocalremovergui) (MIT); see their repositories |
-
-| MVSEP CDX23 | https://github.com/ZFTurbo/MVSEP-CDX23-Cinematic-Sound-Demixing/releases/tag/v.1.0.0 | MIT,Copyright (c) 2026 Roman Solovyev (ZFTurbo)|
+| UVR-MDX-NET-Voc_FT, used by `voc_ft`, `voc_ft_int8` and `voc_ft_cdx23` | [Ultimate Vocal Remover model repository](https://github.com/TRvlvr/model_repo) | as published by the [UVR project](https://github.com/Anjok07/ultimatevocalremovergui) (MIT); see their repositories |
+| MVSEP CDX23 | https://github.com/ZFTurbo/MVSEP-CDX23-Cinematic-Sound-Demixing/releases/tag/v.1.0.0 | MIT, Copyright (c) 2026 Roman Solovyev (ZFTurbo)|
 ## Software used (installed by `install.py` / bundled in the app)
 
 | Package | License |
 |---|---|
+
+| Demucs |**MIT**, Copyright (c) Meta Platforms, Inc. and affiliates. |
 | PyTorch, torchvision | BSD-3-Clause |
-| torchaudio (HDemucs model code) | BSD-2-Clause |
+| torchaudio| BSD-2-Clause |
 | ONNX, onnx2torch | Apache-2.0 |
 | ONNX Runtime | MIT |
 | NumPy | BSD-3-Clause |
