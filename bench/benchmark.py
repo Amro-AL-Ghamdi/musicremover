@@ -22,7 +22,7 @@ survives in a model's output:
 Contributions are estimated per STFT bin and 0.4 s block by least squares
 (output ~= sum_i g_i * source_i), like BSS-Eval's allowed distortion.
 
-Usage:  python bench/benchmark.py [--engine voc_ft_dnr|voc_ft|dnr_demucs] [--strengths 0,4,16]
+Usage:  python bench/benchmark.py [--engine voc_ft_cdx23|voc_ft|cdx23] [--strengths 0,4,16]
                                  [--passes 1,2] [--seconds 14] [--save DIR]
 """
 

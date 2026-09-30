@@ -14,6 +14,8 @@ numpy
 imageio-ffmpeg   # bundled ffmpeg (with Opus), used when ffmpeg isn't installed
 fastapi
 uvicorn
+# HTDemucs model code, used by the CDX23 engine
+demucs           
 # UVR Voc FT (ONNX model, converted to PyTorch so it runs on any GPU)
 onnx
 onnx2torch
