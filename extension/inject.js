@@ -516,8 +516,9 @@
         }
         const idle = performance.now() - this.lastUnit;
         const ahead = start - t; // how soon playback reaches this audio
-        // Send early enough that processing finishes before playback gets there.
-        const lead = Math.min(30, Math.max(4, 1.5 * procSeconds + 2));
+        // Send early enough that processing finishes before playback gets there: at least
+        // 10 s ahead, more when the server has been slow (1.5x its recent time + 2 s).
+        const lead = Math.min(30, Math.max(10, 1.5 * procSeconds + 2));
         let reason = null;
         if (this.session.ended && run[run.length - 1] === this.units[this.units.length - 1]) reason = "end of video";
         else if (ahead <= lead && idle > 1000 && dur >= 3) reason = `playback reaches it in ${Math.max(0, ahead).toFixed(1)}s`;
