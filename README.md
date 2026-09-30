@@ -174,7 +174,7 @@ the default (Normal) bleed suppression:
 |---|---|---|---|---|---|
 | **Voc FT + DnR Demucs** (default) | voices + sound effects | −18.8 dB¹ | −48 dB¹ | **kept (−0.6 dB)** | ≈4 s (0.56 s on an RX 9060 XT) |
 | UVR Voc FT | voices only | **−26.9 dB** | −69 dB | **removed** (−25 dB) | ≈2.3 s |
-| UVR Voc FT int8 | voices only | −27.0 dB | −74 dB | **removed** (−26 dB) | **≈1.1 s** (always CPU) |
+| UVR Voc FT int8 | voices only | −27.0 dB | −74 dB | **removed** (−26 dB) | **≈1.1 s** |
 | DnR Demucs | speech + sound effects | −18.5 dB | −56 dB | kept (−1.5 dB) | ≈1.3 s |
 
 ¹ Measured with the earlier single filter. Each part now has its own filter (see below), which
@@ -191,10 +191,11 @@ should improve both; re-run the benchmark to get current numbers.
   the music. The ONNX file is converted to PyTorch with `onnx2torch`, so it runs on any GPU
   PyTorch supports (including AMD). Its output matches audio-separator's to 27 dB after volume
   matching; audio-separator also scales its output by the input's peak level, which we don't.
-* **UVR Voc FT int8** is Voc FT for PCs without a usable GPU: its frequency layers are quantized
-  to 8-bit integers and it runs with onnxruntime on the CPU, about 2× faster than Voc FT on the
-  CPU and with less memory (≈3.5 GB). It scores the same as Voc FT, except speech is 0.4 dB
-  softer. The quantized file is made from the Voc FT download on first use, in a few seconds.
+* **UVR Voc FT int8** is Voc FT for weaker PCs: on the CPU (no usable GPU, or **Force CPU**) its
+  frequency layers run as 8-bit integers with onnxruntime, about 2× faster than Voc FT on the CPU
+  and with less memory (≈3.5 GB). It scores the same as Voc FT, except speech is 0.4 dB softer.
+  On a GPU it runs the regular Voc FT there in half precision, which is faster still. The
+  quantized file is made from the Voc FT download on first use, in a few seconds.
 * **DnR Demucs** is the Hybrid Demucs baseline from the BandIt paper, trained on
   dialogue/music/effects mixes (DnR). Its weights are on Zenodo (CC-BY-NC 4.0). If the automatic
   download fails, the popup badge says where to put `dnr-demucs.ckpt` by hand.

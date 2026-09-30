@@ -61,8 +61,6 @@ LAST = {"engine": None, "device": None}
 
 def get_engine(name: str, device: str) -> "engines.Engine":
     eng = engines.get(name)  # loaded once (on the CPU); combined engines share their parts
-    if getattr(eng, "cpu_only", False):
-        device = "cpu"
     # Only the model in use stays on the GPU. Free the others *before* moving this one
     # there, otherwise switching models briefly needs room for both and can run out of
     # GPU memory.
@@ -178,7 +176,6 @@ def _separate_sync(data: bytes, mime: str, engine: str, device: str, strength: f
     try:
         with LOCK:
             eng = get_engine(engine, device)
-            device = eng.device
             kept = keep_with_oom_retry(eng, pcm, strength)
             LAST.update(engine=engine, device=device)
     except RuntimeError as e:  # e.g. model weights couldn't be downloaded
