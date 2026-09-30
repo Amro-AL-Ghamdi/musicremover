@@ -8,12 +8,10 @@ stay under their own licenses. Check them before any commercial use.
 
 | Model | Source | License |
 |---|---|---|
-| DnR Demucs (Hybrid Demucs trained on Divide and Remaster), used by `dnr_demucs` and the default `voc_ft_dnr` | [Zenodo record 10160698](https://zenodo.org/records/10160698), from the paper *A Generalized Bandsplit Neural Network for Cinematic Audio Source Separation* (Watcharasupat et al.) | **CC BY-NC 4.0: non-commercial use only** |
+| Demucs |https://github.com/adefossez/demucs| **MIT**,Copyright (c) Meta Platforms, Inc. and affiliates. |
 | UVR-MDX-NET-Voc_FT, used by `voc_ft`, `voc_ft_int8` and `voc_ft_dnr` | [Ultimate Vocal Remover model repository](https://github.com/TRvlvr/model_repo) | as published by the [UVR project](https://github.com/Anjok07/ultimatevocalremovergui) (MIT); see their repositories |
 
-Because the default model uses the DnR Demucs weights, **using this app with its default
-settings is limited to non-commercial use**. `voc_ft` / `voc_ft_int8` don't use them.
-
+| MVSEP CDX23 | https://github.com/ZFTurbo/MVSEP-CDX23-Cinematic-Sound-Demixing/releases/tag/v.1.0.0 | MIT,Copyright (c) 2026 Roman Solovyev (ZFTurbo)|
 ## Software used (installed by `install.py` / bundled in the app)
 
 | Package | License |
