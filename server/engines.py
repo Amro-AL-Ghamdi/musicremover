@@ -357,7 +357,7 @@ class VocFTMVSEPEngine(Engine):
     def __init__(self):
         super().__init__()
         self.voc = get("voc_ft")
-        self.dnr = get("MVSEP_CDX23")
+        self.dnr = get("cdx23")
 
     def to(self, device: str):
         self.voc.to(device)

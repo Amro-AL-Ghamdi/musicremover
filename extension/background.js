@@ -15,7 +15,7 @@ const STRENGTHS = {
   voc_ft_cdx23: { off: 0, normal: 4, strong: 16 },
   voc_ft: { off: 0, normal: 16, strong: 64 },
   voc_ft_int8: { off: 0, normal: 16, strong: 64 },
-  cdx23: (off: 0, normal: 1, strong: 4 },
+  cdx23: {off: 0, normal: 1, strong: 4 },
 };
 const DEFAULT_ENGINE = "voc_ft_cdx23";
 
