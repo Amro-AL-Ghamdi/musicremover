@@ -72,7 +72,8 @@ YouTube player ──appendBuffer(audio segment)──► MediaSource buffer   (
 2. **Start Music Remover** (Start menu / desktop on Windows, the AppImage on Linux). The first
    start finds your GPU and downloads the matching PyTorch (1–3 GB, or ~200 MB for the CPU
    build) and the models. Later starts take a few seconds. Leave the window open while you
-   watch; closing it stops the server.
+   watch; closing it stops the server. It can also be stopped with **Stop Music Remover**
+   (Windows Start menu), `./MusicRemover-x86_64.AppImage --stop` or `./stop.sh` (Linux).
 3. **Load the extension** once: the window prints the extension folder
    (`%LOCALAPPDATA%\MusicRemover\extension` on Windows, `~/.local/share/musicremover/extension`
    on Linux). Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**,
@@ -98,7 +99,8 @@ extension in `chrome://extensions`.
    the default models, then starts the server. Nothing else is needed: ffmpeg comes bundled if
    you don't have it.
 3. **Next time, start the server** with **`run.bat`** (Windows) or **`./run.sh`**, and leave it
-   running while you watch.
+   running while you watch. To stop it (also when it runs in the background or is still
+   installing), use **`stop.bat`** or **`./stop.sh`**.
 4. **Load the extension** once: open `chrome://extensions` (or `edge://extensions`), turn on
    **Developer mode**, click **Load unpacked** and pick the `extension/` folder.
 5. Open a YouTube video. Already-open YouTube tabs are picked up automatically.

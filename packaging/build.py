@@ -116,7 +116,8 @@ def build_linux(work, python_url, appimage=True):
     for name in ("AppRun", "musicremover.desktop"):
         shutil.copy2(os.path.join(PKG, "linux", name), app)
     shutil.copy2(os.path.join(PKG, "linux", "AppRun"), os.path.join(app, "run.sh"))
-    for name in ("AppRun", "run.sh"):
+    shutil.copy2(os.path.join(ROOT, "stop.sh"), app)
+    for name in ("AppRun", "run.sh", "stop.sh"):
         path = os.path.join(app, name)
         os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     shutil.copy2(os.path.join(PKG, "icon.png"), os.path.join(app, "musicremover.png"))
@@ -141,6 +142,7 @@ def build_linux(work, python_url, appimage=True):
 def build_windows(work, python_url):
     app = build_app("windows", work, python_url)
     shutil.copy2(os.path.join(PKG, "windows", "MusicRemover.bat"), app)
+    shutil.copy2(os.path.join(ROOT, "stop.bat"), os.path.join(app, "Stop MusicRemover.bat"))
     shutil.copy2(os.path.join(PKG, "windows", "musicremover.ico"), app)
     log("next: ISCC.exe packaging\\windows\\musicremover.iss -> dist\\MusicRemover-Setup.exe")
 

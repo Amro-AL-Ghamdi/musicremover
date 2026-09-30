@@ -15,6 +15,8 @@ on:
       - "server/requirements.txt"
       - "server/launcher.py"
       - "server/install.py"
+      - "stop.sh"
+      - "stop.bat"
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Stop script
+        # A stand-in server.py (listens on the server port) started like run.sh does;
+        # stop.sh has to end it.
+        run: |
+          mkdir -p t/server && cp stop.sh t/
+          printf 'import http.server\nhttp.server.HTTPServer(("127.0.0.1", 8765), http.server.SimpleHTTPRequestHandler).serve_forever()\n' > t/server/server.py
+          python3 "$PWD/t/server/server.py" & sleep 2
+          curl -sf -o /dev/null 127.0.0.1:8765/ && echo "server up"
+          ./t/stop.sh
+          sleep 1
+          if curl -s -o /dev/null 127.0.0.1:8765/; then echo "still running"; exit 1; fi
+          ./t/stop.sh | grep -q "isn't running"
       - run: python packaging/build.py linux
       - name: Smoke test
         run: build/linux/MusicRemover/python/bin/python3 -c "import fastapi, uvicorn, numpy, onnx, imageio_ffmpeg; print('ok')"
@@ -45,6 +59,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Stop script
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force t\server | Out-Null
+          Copy-Item stop.bat t\
+          Set-Content t\server\server.py 'import http.server; http.server.HTTPServer(("127.0.0.1", 8765), http.server.SimpleHTTPRequestHandler).serve_forever()'
+          $p = Start-Process python -ArgumentList "`"$PWD\t\server\server.py`"" -PassThru
+          Start-Sleep 3
+          Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing | Out-Null; "server up"
+          $out = cmd /c "t\stop.bat x"; $out
+          Start-Sleep 1
+          if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { "still running"; exit 1 }
+          $out = cmd /c "t\stop.bat x"; $out
+          if (-not ($out -match "isn't running")) { exit 1 }
       - run: python packaging/build.py windows
       - name: Smoke test
         run: build\windows\MusicRemover\python\python.exe -c "import fastapi, uvicorn, numpy, onnx, imageio_ffmpeg; print('ok')"

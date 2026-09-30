@@ -4,6 +4,9 @@
 # first start into ~/.local/share/musicremover, along with a copy of the extension.
 HERE="$(dirname "$(readlink -f "$0")")"
 
+# ./MusicRemover-x86_64.AppImage --stop  stops a running server (also ./stop.sh in the .tar.gz).
+if [ "${1:-}" = "--stop" ]; then exec "$HERE/stop.sh"; fi
+
 # Started by double-clicking (no terminal): reopen in a terminal so the log is visible
 # and closing the window stops the server.
 if [ ! -t 1 ] && [ -z "$MR_IN_TERMINAL" ]; then
