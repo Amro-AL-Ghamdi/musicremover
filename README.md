@@ -259,7 +259,9 @@ In the toolbar popup you can:
   Freesound effects). Sounds that are part of the music, and music-like effects (sirens,
   bells), can go either way.
 * DRM-protected videos (Premium movies and similar) use encrypted buffers and can't be processed.
-* Playback faster or slower than 1× changes the pitch of the processed audio.
+* At speeds other than 1× the processed audio is time-stretched (WSOLA) to keep its pitch, like
+  YouTube's own audio. Stretching a chunk takes well under a second; until it's done (right
+  after changing the speed) that chunk plays resampled, i.e. briefly higher or lower.
 * The extension only hooks the player on `youtube.com` (videos and Shorts), not embeds on other
   sites.
 

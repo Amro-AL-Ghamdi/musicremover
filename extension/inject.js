@@ -894,13 +894,106 @@
     return procOut;
   }
 
+  // ---------------------------------------------------------------------------
+  // Playback speed without a pitch change
+  //
+  // An AudioBufferSourceNode played at playbackRate 1.5 is resampled: faster *and*
+  // higher, unlike YouTube's own audio. So at speeds other than 1x each chunk is
+  // time-stretched (WSOLA) to the new length once, and that copy plays at rate 1.
+  // Until a stretched copy is ready, the chunk plays resampled as before.
+  // ---------------------------------------------------------------------------
+
+  // WSOLA: overlap-add 40 ms Hann frames taken every rate*20 ms from the input,
+  // each shifted by up to 10 ms to where it best continues the previous frame, so
+  // waveforms line up and the pitch stays the same. Works in slices (await), so a
+  // 60 s chunk doesn't block the page. Returns the channels, or null if cancelled.
+  // [wsola-begin]
+  async function wsola(channels, sampleRate, rate, cancelled) {
+    const inLen = channels[0].length;
+    const N = 2 * Math.round(0.02 * sampleRate);   // frame length (40 ms)
+    const Hs = N / 2;                              // output hop (50% overlap)
+    const Ha = Hs * rate;                          // input hop
+    const D = Math.round(0.01 * sampleRate);       // search range (+-10 ms)
+    const DEC = 4;                                 // similarity search on a decimated mono copy
+    const outLen = Math.max(1, Math.ceil(inLen / rate));
+    const mono = new Float32Array(Math.ceil(inLen / DEC));
+    for (let i = 0; i < mono.length; i++) {
+      let v = 0;
+      for (let j = i * DEC; j < Math.min(inLen, i * DEC + DEC); j++) for (const ch of channels) v += ch[j];
+      mono[i] = v;
+    }
+    const win = new Float32Array(N);
+    for (let n = 0; n < N; n++) win[n] = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / N);
+    const out = channels.map(() => new Float32Array(outLen + N));
+    const wsum = new Float32Array(outLen + N);
+    const L = Math.floor(N / DEC), Dd = Math.floor(D / DEC);
+    let prev = 0;
+    for (let k = 0, o = 0; o < outLen; k++, o += Hs) {
+      let pos = 0;
+      if (k > 0) {
+        // Where the previous frame's audio naturally continues, compared with candidates
+        // around the nominal position (normalized cross-correlation).
+        const nat = Math.floor((prev + Hs) / DEC);
+        const nom = Math.round(k * Ha / DEC);
+        let best = nom, bestScore = -Infinity;
+        for (let d = -Dd; d <= Dd; d++) {
+          const c = nom + d;
+          if (c < 0 || c + L > mono.length || nat + L > mono.length) continue;
+          let dot = 0, en = 1e-9;
+          for (let n = 0; n < L; n++) { const x = mono[c + n]; dot += x * mono[nat + n]; en += x * x; }
+          const score = dot / Math.sqrt(en);
+          if (score > bestScore) { bestScore = score; best = c; }
+        }
+        pos = Math.min(Math.max(0, best * DEC), Math.max(0, inLen - 1));
+      }
+      const n1 = Math.min(N, inLen - pos);
+      for (let c = 0; c < channels.length; c++) {
+        const src = channels[c], dst = out[c];
+        for (let n = 0; n < n1; n++) dst[o + n] += win[n] * src[pos + n];
+      }
+      for (let n = 0; n < N; n++) wsum[o + n] += win[n];
+      prev = pos;
+      if (k % 256 === 255) {
+        await new Promise((res) => setTimeout(res, 0));
+        if (cancelled()) return null;
+      }
+    }
+    for (const ch of out) for (let i = 0; i < outLen; i++) ch[i] /= Math.max(wsum[i], 1e-3);
+    return out.map((ch) => ch.subarray(0, outLen));
+  }
+  // [wsola-end]
+
+  // The chunk's audio stretched for this speed, or null while it's being made.
+  function stretchedFor(chunk, rate) {
+    if (Math.abs(rate - 1) < 0.01 || !chunk || !chunk.buffer) return null;
+    const st = chunk.stretched;
+    if (st && st.rate === rate && st.source === chunk.buffer) return st.buffer || null;
+    const job = { rate, source: chunk.buffer, buffer: null };
+    chunk.stretched = job;
+    const b = chunk.buffer;
+    const chans = [];
+    for (let c = 0; c < b.numberOfChannels; c++) chans.push(b.getChannelData(c));
+    const t0 = performance.now();
+    wsola(chans, b.sampleRate, rate, () => chunk.stretched !== job).then((res) => {
+      if (!res || chunk.stretched !== job) return;
+      const sb = ctx.createBuffer(res.length, res[0].length, b.sampleRate);
+      res.forEach((ch, c) => sb.copyToChannel(ch, c));
+      job.buffer = sb;
+      log(`chunk ${chunk.start.toFixed(1)}s stretched for ${rate}x in ${((performance.now() - t0) / 1000).toFixed(2)}s`);
+    }).catch((e) => log("time-stretch failed", e));
+    return null;
+  }
+
+  // offset: media seconds into the chunk. A stretched copy plays at rate 1; its
+  // position is offset / rate. Either way media time advances at `rate` per second.
   function startNode(chunk, when, offset, rate) {
     const node = ctx.createBufferSource();
-    node.buffer = chunk.buffer;
-    node.playbackRate.value = rate;
+    const st = stretchedFor(chunk, rate);
+    node.buffer = st || chunk.buffer;
+    node.playbackRate.value = st ? 1 : rate;
     node.connect(processedOut());
-    node.start(when, Math.max(0, offset));
-    return node;
+    node.start(when, Math.max(0, st ? offset / rate : offset));
+    return { node, stretched: !!st };
   }
 
   // Decode a processed chunk from its compressed audio if it isn't decoded (anymore).
@@ -926,6 +1019,7 @@
         const near = c.end > t - 30 && c.start < t + 300;
         if (!near && c !== (current && current.chunk) && c !== (next && next.chunk)) {
           c.buffer = null;
+          c.stretched = null;
           if (c.cacheKey && !c.decoding) c.encoded = null; // fetched again from the cache
         }
       }
@@ -1020,7 +1114,9 @@
       current = next;
       next = null;
     }
+    // (Also restarts once a pitch-preserving copy for this speed is ready.)
     if (current && (current.chunk !== chunk || current.rate !== rate ||
+        current.stretched !== !!stretchedFor(chunk, rate) ||
         Math.abs(mediaTimeNow(current) - t) > 0.08)) {
       stopProcessed();
     }
@@ -1029,17 +1125,21 @@
       const when = ctx.currentTime + 0.02;
       const mediaStart = t + 0.02 * rate;
       current = { chunk, ctxStart: when, mediaStart, rate,
-                  node: startNode(chunk, when, mediaStart - chunk.audioStart, rate) };
+                  ...startNode(chunk, when, mediaStart - chunk.audioStart, rate) };
     }
     // Schedule the following chunk sample-accurately so boundaries are seamless.
     const following = session.chunks.find((c) => c.state === "done" && Math.abs(c.start - chunk.end) < 0.1);
     ensureDecoded(following);
-    if (following && following.buffer && (!next || next.chunk !== following)) {
+    // Stretched ahead of time (it's ready long before playback gets there), so chunk
+    // boundaries don't switch between resampled and pitch-preserved audio.
+    const followingStretched = following && !!stretchedFor(following, rate);
+    if (following && following.buffer &&
+        (!next || next.chunk !== following || next.stretched !== followingStretched)) {
       stopNode(next);
       const when = current.ctxStart + (following.start - current.mediaStart) / rate;
       if (when > ctx.currentTime + 0.01) {
         next = { chunk: following, ctxStart: when, mediaStart: following.start, rate,
-                 node: startNode(following, when, following.start - following.audioStart, rate) };
+                 ...startNode(following, when, following.start - following.audioStart, rate) };
       }
     }
   }
