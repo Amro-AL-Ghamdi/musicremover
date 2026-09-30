@@ -12,7 +12,7 @@
   window.__musicremoverBridgeAlive = alive;
   // engine + bleed are passed along so the page can re-process chunks when they change.
   const DEFAULTS = { enabled: true, mode: "wait", chunkSeconds: 60, firstChunkSeconds: 20, readySound: true,
-                     engine: "voc_ft_dnr", bleed: "normal", cache: true };
+                     engine: "voc_ft_cdx23", bleed: "normal", cache: true };
 
   const pushSettings = () =>
     chrome.storage.sync.get(DEFAULTS, (settings) => window.postMessage({ [TAG]: "settings", settings }, "*"));

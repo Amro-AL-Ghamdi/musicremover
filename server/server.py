@@ -13,7 +13,7 @@ Env:  MR_DEVICE  force a device: cuda | mps | cpu (default: GPU if available).
       MR_FP16=0  disable half precision on GPU
       MR_OVERLAP, MR_BATCH  window overlap (2) and batch size (8 GPU / 2 CPU)
 
-Per request the extension sends ?engine=voc_ft_dnr|voc_ft|voc_ft_int8|dnr_demucs, ?device=auto|cpu
+Per request the extension sends ?engine=voc_ft_cdx23|voc_ft|voc_ft_int8|cdx23, ?device=auto|cpu
 (the popup's "Force CPU" switch) and ?strength= (bleed suppression, see
 engines.suppress_bleed).
 """

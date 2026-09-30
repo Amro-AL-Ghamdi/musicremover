@@ -1,21 +1,21 @@
 """Music removal models. Each engine takes stereo float32 audio [2, T] at
 44.1 kHz and returns what should be *kept*, same shape.
 
-  voc_ft_dnr  (default) Voices from voc_ft + sound effects from dnr_demucs.
-  voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound effects
+  voc_ft_cdx23  (default) Voices from voc_ft + sound sfx from MVSEPCDX23.
+  voc_ft      UVR-MDX-NET-Voc_FT (UVR). Fast; keeps vocals only, so sound sfx
               are removed together with the music.
   voc_ft_int8 Voc FT quantized to int8 for weaker machines: on the CPU it runs with
               onnxruntime, about 2x faster than voc_ft there; on a GPU it runs
               the regular Voc FT.
-  dnr_demucs  Hybrid Demucs trained on DnR (the baseline from the BandIt paper):
-              splits speech / music / effects; keeps speech + effects. Weights
-              come from Zenodo (CC-BY-NC 4.0).
+  MVSEP-CDX23 the replacement for the previous model faster and seems to perform better
+  
 
 Shared on top of every model:
 
   * Bleed suppression. The model's own music estimate drives one extra,
     cheap spectral mask on what we keep:
         keep *= |keep|^2 / (|keep|^2 + strength * |music|^2)
+    
     strength 0 disables it. See bench/README.md for measurements.
   * Speed. On a GPU the model runs in half precision (fp16). If fp16 fails
     or produces non-finite output, it falls back to full precision for the
@@ -25,7 +25,6 @@ Shared on top of every model:
 import os
 import shutil
 import urllib.request
-
 import numpy as np
 import torch
 
@@ -33,7 +32,7 @@ SR = 44100
 CACHE = os.environ.get("MR_CACHE", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache"))
 DEFAULT_STRENGTH = 1.0
 
-DNR_DEMUCS_URL = "https://zenodo.org/api/records/10160698/files/dnr-demucs.ckpt/content"
+MVSEP_CDX23_URL ="https://github.com/ZFTurbo/MVSEP-CDX23-Cinematic-Sound-Demixing/releases/download/v.1.0.0/97d170e1-dbb4db15.th"
 UVR_REL = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models"
 
 
@@ -60,9 +59,6 @@ def ffmpeg_exe() -> str:
         raise RuntimeError("ffmpeg not found: install it, or `pip install imageio-ffmpeg`") from e
 
 
-def _state_dict(path: str) -> dict:
-    sd = torch.load(path, map_location="cpu", weights_only=False)
-    return sd.get("state_dict", sd) if isinstance(sd, dict) else sd
 
 
 def overlap_add(fn, x: torch.Tensor, chunk: int, overlap: int, batch: int) -> torch.Tensor:
@@ -176,33 +172,38 @@ class Engine:
         return out.cpu().numpy()
 
 
-class DnRDemucsEngine(Engine):
-    keep_stems = ("speech", "effects")
+class MVSEPCDX23Engine(Engine):
+    keep_stems = ("speech", "sfx")
     music_stems = ("music",)
-
+    
     def __init__(self):
         super().__init__()
-        import torchaudio
-        self.stems = ["speech", "music", "effects"]
-        # Same settings as configs/model/demucs.yaml in kwatcharasupat/bandit (mono model).
-        self.net = torchaudio.models.HDemucs(sources=self.stems, audio_channels=1, nfft=4096, depth=6)
+        try :
+            from demucs.htdemucs import HTDemucs
+            import fractions
+
+            # Same settings as configs/model/demucs.yaml in kwatcharasupat/bandit (mono model).
+        except ImportError as e:
+            raise ImportError("demucs not downloaded run pip install -r requirements.txt") from e
+        torch.serialization.add_safe_globals([HTDemucs,fractions.Fraction])
         try:
-            sd = _state_dict(_fetch(DNR_DEMUCS_URL, "dnr-demucs.ckpt"))
+            pkg =  torch.load(_fetch(MVSEP_CDX23_URL),map_location = "cpu", weights_only = True)
         except OSError as e:
             raise RuntimeError(
-                f"Couldn't download the DnR Demucs weights ({e}). Download dnr-demucs.ckpt from "
-                f"https://zenodo.org/records/10160698 into {CACHE}") from e
-        # Lightning checkpoints prefix keys (e.g. "model.demucs."); keep what follows "demucs.".
-        sd = {k.split("demucs.", 1)[1] if "demucs." in k else k: v for k, v in sd.items()}
-        self.net.load_state_dict(sd)
+                f"Couldn't download the MVSEP weights ({e}). Download 97d170e1-dbb4db15.th from "
+                f"https://github.com/ZFTurbo/MVSEP-CDX23-Cinematic-Sound-Demixing/releases/download/v.1.0.0/97d170e1-dbb4db15.th into {CACHE}") from e
+            # Lightning checkpoints prefix keys (e.g. "model.demucs."); keep what follows "demucs.".
+
+        self.stems = ["music", "sfx", "speech"] 
+        self.net = HTDemucs(*pkg["args"], **pkg["kwargs"])
+        self.net.load_state_dict(pkg["state"])
         self.net.eval()
-        self.chunk = 6 * SR
+        self.chunk = int(self.net.segment * SR)
+
 
     def run(self, b: torch.Tensor) -> torch.Tensor:
-        # Mono model: fold the stereo channels into the batch and back.
-        B, C, T = b.shape
-        y = self.net(b.reshape(B * C, 1, T))          # [B*C, S, 1, T]
-        return y.reshape(B, C, len(self.stems), T).transpose(1, 2)
+        # replacement for the dnr demucs better because model is already stereo.
+        return self.net(b)
 
 
 class _VocalsOnly(Engine):
@@ -333,30 +334,29 @@ class VocFTInt8Engine(VocFTEngine):
         return self.batch_override or int(os.environ.get("MR_BATCH", 1))
 
 
-class VocFTDnREngine(Engine):
-    """Voices from UVR Voc FT + sound effects from DnR Demucs (the default).
+class VocFTMVSEPEngine(Engine):
+    """Voices from UVR Voc FT + sound sfx from DnR Demucs (the default).
 
-    Voc FT has no effects stem (its "other" is music and effects together), and DnR
-    Demucs separates effects from music. Combining them keeps Voc FT's voices and adds
-    DnR's effects back. Both models run on every chunk, and they're shared with the
-    standalone voc_ft / dnr_demucs options, so switching doesn't load anything twice.
+    Voc FT has no sfx stem (its "other" is music and sfx together), and cdx23 separates sfx from music. Combining them keeps Voc FT's voices and adds
+    cdx23's sfx back. Both models run on every chunk, and they're shared with the
+    standalone voc_ft / MVSEPCDX23 options, so switching doesn't load anything twice.
 
     Each part gets its own bleed filter, driven by the model it came from:
       voices  = filter(Voc FT vocals,  Voc FT other,  VOCAL_FACTOR * strength)
-      effects = filter(DnR effects,    DnR music,     strength)
-    Measured with a single DnR-driven filter, pauses only reached -48 dB because the
+      sfx = filter(cdx23 sfx,    cdx23 music,     strength)
+    Measured with a single cdx23-driven filter, pauses only reached -48 dB because the
     music Voc FT lets through wasn't caught; Voc FT's own filter handles that (-69 dB
     in pauses on its own at strength 16).
     """
 
-    keep_stems = ("vocals", "effects")
+    keep_stems = ("vocals", "sfx")
     music_stems = ("music",)
     VOCAL_FACTOR = 4  # Voc FT's filter works best ~4x higher (standalone levels 16/64)
 
     def __init__(self):
         super().__init__()
         self.voc = get("voc_ft")
-        self.dnr = get("dnr_demucs")
+        self.dnr = get("cdx23")
 
     def to(self, device: str):
         self.voc.to(device)
@@ -379,17 +379,17 @@ class VocFTDnREngine(Engine):
     def stems_of(self, x) -> dict:
         v = self.voc.stems_of(x)
         d = self.dnr.stems_of(x)
-        return {"vocals": v["vocals"], "voc_other": v["other"], "effects": d["effects"], "music": d["music"]}
+        return {"vocals": v["vocals"], "voc_other": v["other"], "sfx": d["sfx"], "music": d["music"]}
 
     def apply(self, stems: dict, strength: float) -> torch.Tensor:
         voices = suppress_bleed(stems["vocals"], stems["voc_other"], self.VOCAL_FACTOR * strength)
-        effects = suppress_bleed(stems["effects"], stems["music"], strength)
-        return voices + effects
+        sfx = suppress_bleed(stems["sfx"], stems["music"], strength)
+        return voices + sfx
 
 
-ENGINES = {"voc_ft_dnr": VocFTDnREngine, "voc_ft": VocFTEngine, "voc_ft_int8": VocFTInt8Engine,
-           "dnr_demucs": DnRDemucsEngine}
-DEFAULT_ENGINE = "voc_ft_dnr"
+ENGINES = {"voc_ft_cdx23": VocFTMVSEPEngine, "voc_ft": VocFTEngine, "voc_ft_int8": VocFTInt8Engine,
+           "cdx23": MVSEPCDX23Engine}
+DEFAULT_ENGINE = "voc_ft_cdx23"
 
 _loaded: dict = {}
 

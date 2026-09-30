@@ -11,13 +11,13 @@ async function serverUrl() {
 // Bleed-suppression strength per model and level, chosen from bench/README.md:
 // Voc FT keeps improving up to much higher strengths before speech suffers.
 const STRENGTHS = {
-  // Effects filter strength; the voices filter runs at 4x this (engines.VocFTDnREngine).
-  voc_ft_dnr: { off: 0, normal: 4, strong: 16 },
+  // Effects filter strength; the voices filter runs at 4x this (engines.VocFTMVSEPEngine).
+  voc_ft_cdx23: { off: 0, normal: 4, strong: 16 },
   voc_ft: { off: 0, normal: 16, strong: 64 },
   voc_ft_int8: { off: 0, normal: 16, strong: 64 },
-  dnr_demucs: { off: 0, normal: 1, strong: 4 },
+  cdx23: {off: 0, normal: 4, strong: 16 },
 };
-const DEFAULT_ENGINE = "voc_ft_dnr";
+const DEFAULT_ENGINE = "voc_ft_cdx23";
 
 // engine: model; device: "auto" (GPU if the server has one) or "cpu"; bleed: off|normal|strong.
 async function processingOptions() {
